@@ -133,6 +133,31 @@
   // Fixed categories are bills with their own monthly amounts.
   const isFlex = (cat) => { const c = S.cats.find((x) => x.id === cat); return !c || c.kind === 'flex'; };
   const poolMonth = (m) => C.round2((budgetOf(m).foodWeek || 0) * 52 / 12);
+  // The weekly spending money card, used on Home and in Budget > Week.
+  function weekHero(ws, isNow) {
+    const b = budgetOf(), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw ? sp / fw : 0;
+    const t = C.today(), days = daysToSunday();
+    const today = sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date === t), (e) => e.amount);
+    let h = ring(pct, C.status(pct), fm(left), left < 0 ? 'over' : 'left this week');
+    if (isNow) {
+      h += left > 0 ? `<p class="tc med">${fm(left / days)} a day for the next ${days} day${days === 1 ? '' : 's'}</p>` : `<p class="tc med r">${fm(-left)} over. Try to spend nothing until Sunday.</p>`;
+      h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent. Today: ${fm(today)}.</p>`;
+    } else h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent, ${C.shortDate(ws)} to ${C.shortDate(we)}.</p>`;
+    if (fw > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>`;
+    return h;
+  }
+  // Past full weeks of spending money, newest first.
+  function pastWeeks(n) {
+    const out = [], cur = C.weekStart(C.today());
+    if (!S.expenses.length) return out;
+    const first = C.weekStart(S.expenses.map((e) => e.date).sort()[0]);
+    for (let i = 1; i <= n; i++) {
+      const ws = C.addDays(cur, -7 * i);
+      if (ws < first) break;
+      out.push({ ws, sp: weekSpend(ws), lim: weekLimit(ws) });
+    }
+    return out;
+  }
   function weekSpend(ws, cat) {
     const we = C.addDays(ws, 6);
     return sum(S.expenses.filter((e) => counted(e) && (cat ? e.cat === cat : isFlex(e.cat)) && e.date >= ws && e.date <= we), (e) => e.amount);
@@ -256,9 +281,11 @@
     let h = `<div class="head"><h1 class="title">Home</h1><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div><div class="sub">${C.longDate(t)}</div>`;
     h += `<div class="seg"><button class="${S.mode === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${S.mode === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
 
+    const ws = C.weekStart(t);
+    h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn" data-act="weekDetail">This week</button><button class="btn primary" data-act="add">Log spending</button></div>');
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
-      h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
+      h += card('Sunday review', `<p class="med">Review the week and settle up</p>${(() => { const w = pastWeeks(1)[0]; return w ? `<p class="${w.sp > w.lim ? 'r' : 'g'}">Last week: ${fm(w.sp)} of ${fm(w.lim)}, ${fm(Math.abs(w.lim - w.sp))} ${w.sp > w.lim ? 'over' : 'under'}.</p>` : ''; })()}<p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
     }
     if (S.setupDone && (S.setupV || 0) < 2 && !S.dismissed.v2) {
       h += card('Finish setting up', `<p class="med">New setup steps were added</p><p class="muted">Pay schedule, each credit card, bill due dates, and savings goals. It takes about 3 minutes and fills in everything the app uses.</p><div class="btns"><button class="btn" data-act="dismissV2">Not now</button><button class="btn primary" data-act="quickSetup">Finish setup</button></div>`, 'note');
@@ -274,12 +301,11 @@
       h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>${payName()} has ${fm(payPool())}. You are short ${fm(cardsOwed() - payPool())} before you pay them off.</p>`, 'warn');
     }
 
-    const ws = C.weekStart(t), fw = weekLimit(ws), sp = weekSpend(ws), left = fw - sp;
-    h += card('Left to spend this week', `<p class="big ${left < 0 ? 'r' : 'g'}">${fm(left)} ${left < 0 ? 'over' : 'left'}</p><p class="muted">${fm(sp)} of ${fm(fw)} spending money used. ${daysToSunday()} days until Sunday.${fw > b.foodWeek ? ' Includes ' + fm(fw - b.foodWeek) + ' rolled over.' : ''}</p>${bar(fw ? sp / fw : 0, C.status(fw ? sp / fw : 0))}`);
+    const pw = pastWeeks(4), under = pw.filter((w) => w.sp <= w.lim).length;
+    if (pw.length) h += card('Recent weeks', `<p class="med">${under} of ${pw.length} week${pw.length === 1 ? '' : 's'} under ${fm(budgetOf().foodWeek)}</p>` + pw.map((w) => `<div class="row item"><span>${C.shortDate(w.ws)}</span><b class="${w.sp > w.lim ? 'r' : 'g'}">${fm(w.sp)} <span class="muted small">${w.sp > w.lim ? fm(w.sp - w.lim) + ' over' : fm(w.lim - w.sp) + ' under'}</span></b></div>`).join(''));
 
-    const ms = monthSpend(mk), spent = sum(Object.values(ms)), plan = plannedSpend();
-    const over = S.cats.filter((c) => (b.amounts[c.id] || 0) > 0 && (ms[c.id] || 0) > b.amounts[c.id]).length;
-    h += card('Month status', `<p class="big">${fm(spent)} <span class="muted med">of ${fm(plan)}</span></p>${bar(plan ? spent / plan : 0, C.status(plan ? spent / plan : 0))}<p class="muted">${over ? over + ' categor' + (over === 1 ? 'y is' : 'ies are') + ' over budget.' : 'Nothing is over budget.'}</p>`);
+    const billsDue = S.bills, paidN = billsDue.filter((x) => billPaid(x, mk)).length, unpaid = sum(billsDue.filter((x) => !billPaid(x, mk)), (x) => x.amount);
+    if (billsDue.length) h += card('Bills this month', `<p class="med">${paidN} of ${billsDue.length} paid</p>${bar(paidN / billsDue.length, paidN === billsDue.length ? 'g' : 'b')}<p class="muted">${unpaid > 0 ? fm(unpaid) + ' still to pay from your monthly income.' : 'All paid. Nothing else to plan this month.'}</p><button class="mt8 btn small" data-act="openMore" data-v="bills">Recurring bills</button>`);
 
     const saved = savedInMonth(mk), sp2 = plannedSavings();
     h += card('Savings this month', `<p class="big g">${fm(saved)} <span class="muted med">of ${fm(sp2)}</span></p>${bar(sp2 ? saved / sp2 : 0, 'b')}<p class="muted small">Bonus this month: ${fm(bonusInMonth(mk))}. Bonus money goes straight to savings and is never income.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`);
@@ -309,14 +335,15 @@
   }
   function WeekView() {
     const ws = C.weekStart(C.addDays(C.today(), ui.wOff * 7)), we = C.addDays(ws, 6), b = budgetOf();
-    const sp = weekSpend(ws), fw = weekLimit(ws), left = fw - sp, pct = fw ? sp / fw : 0;
     let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
-    const sub = ui.wOff === 0 ? `${daysToSunday()} days until Sunday` : (left < 0 ? 'over' : 'left');
-    h += card('Spending money', ring(pct, C.status(pct), fm(left), left < 0 ? 'over budget' : 'left') +
-      `<p class="tc muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` + (fw > b.foodWeek ? `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>` : '') +
-      (ui.wOff === 0 && left > 0 ? `<p class="tc muted small">About ${fm(left / daysToSunday())} a day to stay on track.</p>` : ''));
+    h += card('Spending money', weekHero(ws, ui.wOff === 0));
     const list = S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
     h += card('Spent this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
+    const pw = pastWeeks(8);
+    if (pw.length) {
+      const avg = sum(pw, (w) => w.sp) / pw.length, mx = Math.max(...pw.map((w) => Math.max(w.sp, w.lim)), 1);
+      h += card('Past weeks', `<p class="muted">Average ${fm(avg)} a week. ${pw.filter((w) => w.sp <= w.lim).length} of ${pw.length} under the limit.</p>` + pw.map((w) => `<div class="rline"><div class="row"><span>${C.shortDate(w.ws)}</span><b class="${w.sp > w.lim ? 'r' : ''}">${fm(w.sp)} <span class="muted small">of ${fm(w.lim)}</span></b></div>${bar(w.sp / mx, w.sp > w.lim ? 'r' : 'g')}</div>`).join(''));
+    }
     return h;
   }
   function MonthView() {
@@ -1131,6 +1158,7 @@
     mode(d) { S.mode = d.m; save(); render(); },
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
+    weekDetail() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = 0; render(); window.scrollTo(0, 0); },
     editExp(d) { addSheet(d.id); },
     delExp(d) {
       const e = S.expenses.find((x) => x.id === d.id); if (!e) return;
