@@ -78,7 +78,7 @@
         { match: 'amazon', cat: 'amazon' }, { match: 'amzn', cat: 'amazon' },
         { match: 'shell', cat: 'gas' }, { match: 'costco gas', cat: 'gas' }
       ],
-      csvMap: null, lastBackup: null, lastAccount: 'chk', dismissed: {}
+      paySource: 'checking', csvMap: null, lastBackup: null, lastAccount: 'chk', dismissed: {}
     };
   }
 
@@ -173,6 +173,9 @@
   }
   const cardsOwed = () => sum(S.accounts.filter((a) => a.type === 'card'), (a) => a.balance);
   const checking = () => sum(S.accounts.filter((a) => a.type === 'checking'), (a) => a.balance);
+  const payType = () => (S.paySource === 'savings' ? 'savings' : 'checking');
+  const payPool = () => sum(S.accounts.filter((a) => a.type === payType()), (a) => a.balance);
+  const payName = () => (payType() === 'savings' ? 'Savings' : 'Checking');
 
   // ---------- small UI parts ----------
   const bar = (pct, cls) => `<div class="bar"><div class="fill ${cls}" data-w="${Math.max(0, Math.min(100, pct * 100)).toFixed(1)}"></div></div>`;
@@ -219,8 +222,8 @@
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
       h += card('Back up your data', `<p class="med">${lb ? 'It has been ' + C.daysBetween(lb, t) + ' days since your last backup.' : 'You have not backed up yet.'}</p><p class="muted small">Your data only lives on this phone. If Safari clears it or you lose the phone, a backup is the only way to get it back. Save the file to iCloud Drive.</p><div class="btns"><button class="btn" data-act="dismissBackup">Tomorrow</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`, lb ? '' : 'warn');
     }
-    if (cardsOwed() > checking() && cardsOwed() > 0) {
-      h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>Checking has ${fm(checking())}. You are short ${fm(cardsOwed() - checking())} before autopay.</p>`, 'warn');
+    if (cardsOwed() > payPool() && cardsOwed() > 0) {
+      h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>${payName()} has ${fm(payPool())}. You are short ${fm(cardsOwed() - payPool())} before you pay them off.</p>`, 'warn');
     }
 
     const ws = C.weekStart(t), fw = b.foodWeek, sp = weekSpend(ws), left = fw - sp;
@@ -387,10 +390,11 @@
 
   function CardsView() {
     let h = back() + `<h1 class="title">Cards and balances</h1><div class="sub">Nickname and last 4 digits only</div>`;
-    const owed = cardsOwed(), chk = checking();
-    if (owed > chk && owed > 0) h += card('Warning', `<p class="med r">Cards owe ${fm(owed)}</p><p>Checking has ${fm(chk)}. You are short ${fm(owed - chk)} before autopay.</p>`, 'warn');
-    else if (owed > 0) h += card('Autopay check', `<p class="med g">Checking covers your cards</p><p class="muted">${fm(chk - owed)} to spare after ${fm(owed)} in card balances.</p>`);
-    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}" style="margin-top:8px"></div>`).join(''));
+    const owed = cardsOwed(), chk = payPool();
+    if (owed > chk && owed > 0) h += card('Warning', `<p class="med r">Cards owe ${fm(owed)}</p><p>${payName()} has ${fm(chk)}. You are short ${fm(owed - chk)} before you pay them off.</p>`, 'warn');
+    else if (owed > 0) h += card('Payoff check', `<p class="med g">${payName()} covers your cards</p><p class="muted">${fm(chk - owed)} to spare after ${fm(owed)} in card balances.</p>`);
+    h += card('Pay cards off from', `<select data-path="paySource" data-re="1"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select>`);
+    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : a.type === 'savings' ? 'Savings' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}" style="margin-top:8px"></div>`).join(''));
     h += `<button class="btn primary" data-act="addAcct">Add a card or account</button>`;
     return h;
   }
@@ -568,10 +572,11 @@
   function setupStart() {
     openSheet(`<h2>Quick setup</h2><p class="muted">Who is this app for?</p><div class="col"><button class="btn primary" data-act="setupMahi">I am Mahi</button><button class="btn" data-act="setupNew">Someone new, start blank</button><button class="btn" data-act="setupSkip">Skip for now</button></div><p class="muted small mt">Mahi gets the budget and bills that are already filled in. Someone new gets a clean slate and fills in their own numbers. This takes about a minute.</p>`);
   }
+  const acctBal = (type) => { const a = S.accounts.find((x) => x.type === type); return a ? a.balance : 0; };
   function setupForm() {
     const b = S.budget.school, me = mahi();
     const cats = me ? '' : '<p class="label mt">Monthly budget by category</p><p class="muted small">Leave at 0 for anything you do not spend on.</p>' + S.cats.filter((c) => c.id !== 'other').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" name="c_${c.id}" value="${b.amounts[c.id] || 0}">`).join('');
-    openSheet(`<h2>${me ? 'Check your numbers' : 'Your numbers'}</h2><p class="muted">${me ? 'Your budget and bills are already filled in. Just confirm these three.' : 'Enter what you know. You can change everything later in More.'}</p><form data-form="quicksetup"><label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" name="inc" value="${b.income || ''}" placeholder="0"><label class="f">Checking balance right now</label><input type="text" inputmode="decimal" name="bal" value="${(S.accounts[0] && S.accounts[0].balance) || ''}" placeholder="0"><label class="f">Food and fun per week</label><input type="text" inputmode="decimal" name="fw" value="${b.foodWeek || ''}" placeholder="0">${cats}<div class="btns"><button class="btn" type="button" data-act="setupSkip">Skip</button><button class="btn primary" type="submit">Finish</button></div></form>`);
+    openSheet(`<h2>${me ? 'Check your numbers' : 'Your numbers'}</h2><p class="muted">${me ? 'Your budget and bills are already filled in. Confirm these, and skip any you do not know.' : 'Enter what you know. You can change everything later in More.'}</p><form data-form="quicksetup"><label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" name="inc" value="${b.income || ''}" placeholder="0"><label class="f">Checking balance right now</label><input type="text" inputmode="decimal" name="bal" value="${acctBal('checking') || ''}" placeholder="0"><label class="f">Savings balance right now</label><input type="text" inputmode="decimal" name="sav" value="${acctBal('savings') || ''}" placeholder="0"><label class="f">Credit card balance owed (all cards)</label><input type="text" inputmode="decimal" name="cc" value="${acctBal('card') || ''}" placeholder="0"><label class="f">I pay my cards off from</label><select name="src"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select><label class="f">Food and fun per week</label><input type="text" inputmode="decimal" name="fw" value="${b.foodWeek || ''}" placeholder="0">${cats}<div class="btns"><button class="btn" type="button" data-act="setupSkip">Skip</button><button class="btn primary" type="submit">Finish</button></div></form>`);
   }
   function setupDone() {
     openSheet(`<h2>You are set</h2><p class="med">Log purchases as you make them.</p><p class="muted">Your data only lives on this phone, so the app will remind you to back it up every week. Make your first backup now and save it to iCloud Drive.</p><div class="btns"><button class="btn" data-act="closeSheet">Later</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`);
@@ -678,7 +683,15 @@
     quicksetup(fd) {
       const b = S.budget.school, s2 = S.budget.summer;
       b.income = C.num(fd.get('inc')); b.foodWeek = C.num(fd.get('fw')); s2.foodWeek = b.foodWeek;
-      if (S.accounts[0]) S.accounts[0].balance = C.num(fd.get('bal'));
+      const put = (type, id, name, raw) => {
+        if (raw === null || String(raw).trim() === '') return;
+        const val = C.round2(C.num(raw)); const a = S.accounts.find((x) => x.type === type);
+        if (a) a.balance = val; else S.accounts.push({ id, name, last4: '', type, balance: val });
+      };
+      put('checking', 'chk', 'Checking', fd.get('bal'));
+      put('savings', 'sav', 'Savings', fd.get('sav'));
+      put('card', 'cc1', 'Credit cards', fd.get('cc'));
+      S.paySource = fd.get('src') === 'savings' ? 'savings' : 'checking';
       if (!mahi()) S.cats.forEach((c) => {
         if (c.id === 'other') return;
         const v = fd.get('c_' + c.id); if (v === null) return;
@@ -883,7 +896,7 @@
   }
   function acctSheet(id) {
     const a = id ? S.accounts.find((x) => x.id === id) : null;
-    openSheet(`<h2>${a ? 'Edit account' : 'Add a card or account'}</h2><p class="muted">Nickname and last 4 digits only. Never enter full numbers.</p><form data-form="acct"><input type="hidden" name="id" value="${id || ''}"><label class="f">Nickname</label><input type="text" name="name" value="${esc(a ? a.name : '')}" required><label class="f">Last 4 digits</label><input type="text" name="last4" inputmode="numeric" maxlength="4" value="${esc(a ? a.last4 : '')}"><label class="f">Type</label><select name="type"><option value="card" ${a && a.type === 'card' ? 'selected' : ''}>Credit card</option><option value="checking" ${a && a.type === 'checking' ? 'selected' : ''}>Checking</option></select><label class="f">Balance</label><input type="text" inputmode="decimal" name="balance" value="${a ? a.balance || '' : ''}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${a && S.accounts.length > 1 ? `<button class="btn danger" type="button" style="margin-top:10px" data-act="delAcct" data-id="${a.id}">Delete</button>` : ''}</form>`);
+    openSheet(`<h2>${a ? 'Edit account' : 'Add a card or account'}</h2><p class="muted">Nickname and last 4 digits only. Never enter full numbers.</p><form data-form="acct"><input type="hidden" name="id" value="${id || ''}"><label class="f">Nickname</label><input type="text" name="name" value="${esc(a ? a.name : '')}" required><label class="f">Last 4 digits</label><input type="text" name="last4" inputmode="numeric" maxlength="4" value="${esc(a ? a.last4 : '')}"><label class="f">Type</label><select name="type"><option value="card" ${a && a.type === 'card' ? 'selected' : ''}>Credit card</option><option value="checking" ${a && a.type === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${a && a.type === 'savings' ? 'selected' : ''}>Savings</option></select><label class="f">Balance</label><input type="text" inputmode="decimal" name="balance" value="${a ? a.balance || '' : ''}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${a && S.accounts.length > 1 ? `<button class="btn danger" type="button" style="margin-top:10px" data-act="delAcct" data-id="${a.id}">Delete</button>` : ''}</form>`);
   }
 
   // ---------- events ----------
