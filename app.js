@@ -1375,6 +1375,7 @@
     fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null;
     if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
     applyBudgetNov2026();
+    removeDadPayment();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
@@ -1387,6 +1388,15 @@
     S.bills.forEach((b) => { if (bills[b.name] !== undefined) b.amount = bills[b.name]; });
     S.budgetNov2026 = true; save();
     setTimeout(() => toast('Budget updated: $943.47 a month'), 600);
+  }
+  // One time: Dad's payment is no longer part of the budget.
+  function removeDadPayment() {
+    if (S.persona === 'blank' || S.noDadPay) return;
+    ['school', 'summer'].forEach((m) => { S.budget[m].amounts.dad = 0; });
+    S.bills = S.bills.filter((b) => b.cat !== 'dad');
+    if (!S.expenses.some((e) => e.cat === 'dad')) S.cats = S.cats.filter((c) => c.id !== 'dad');
+    S.noDadPay = true; save();
+    setTimeout(() => toast("Dad's payment removed: budget is $806.65 a month"), 700);
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
