@@ -215,7 +215,7 @@
 
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
-      h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
+      h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
     }
     const lb = S.lastBackup;
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
@@ -245,7 +245,7 @@
     const st = takeoutStreak();
     h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food and fun purchase.' : 'No food and fun logged yet.'}</p>`);
 
-    h += `<div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Monthly recap</button></div>`;
+    h += `<div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
     return h;
   }
 
@@ -358,7 +358,7 @@
     if (v === 'rules') return RulesView();
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
-    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
+    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
     return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="quickSetup">Run quick setup again</button>');
   }
 
@@ -437,22 +437,102 @@
   }
 
   function RecapView() {
-    const mk = ui.rmk || C.monthKey(C.today()), b = budgetOf();
-    const list = S.expenses.filter((e) => counted(e) && C.monthKey(e.date) === mk);
-    const tot = sum(list, (e) => e.amount);
-    const groups = {};
-    list.forEach((e) => { const k = (e.note || catName(e.cat)).trim().toLowerCase(); groups[k] = groups[k] || { n: e.note || catName(e.cat), v: 0, c: 0 }; groups[k].v += e.amount; groups[k].c++; });
-    const top = Object.values(groups).sort((a, c) => c.v - a.v).slice(0, 5);
-    const takeouts = list.filter((e) => e.takeout || e.cat === 'food');
-    const amz = list.filter((e) => e.cat === 'amazon').length;
-    const saved = savedInMonth(mk), plan = plannedSavings();
-    let h = back() + `<h1 class="title">Monthly recap</h1>` + monthNav(mk, 'rnav');
-    h += card('Total spent', `<p class="big">${fm(tot)}</p><p class="muted">Budget was ${fm(plannedSpend())}.</p>`);
-    h += card('Top merchants', top.length ? top.map((g) => `<div class="row item"><span>${esc(g.n)} <span class="muted small">${g.c}x</span></span><b>${fm(g.v)}</b></div>`).join('') : '<p class="muted">Nothing logged this month.</p>');
-    h += card('Takeout', `<p class="big">${fm(sum(takeouts, (e) => e.amount))}</p><p class="muted">${takeouts.length} purchase${takeouts.length === 1 ? '' : 's'} in food and fun.</p>`);
-    h += card(esc(catName('amazon')) + ' orders', `<p class="big">${amz}</p>`);
-    h += card('Saved vs plan', `<p class="big ${saved >= plan ? 'g' : ''}">${fm(saved)} <span class="muted med">of ${fm(plan)}</span></p>${bar(plan ? saved / plan : 0, saved >= plan ? 'g' : 'y')}<p class="muted">${saved >= plan ? 'You hit your savings plan.' : fm(plan - saved) + ' short of plan.'}</p>`);
+    const r = report(), isW = r.per === 'week', unit = isW ? 'week' : 'month';
+    let h = back() + `<h1 class="title">Reports</h1><div class="sub">Everything you logged, by ${unit}</div>`;
+    h += `<div class="seg"><button class="${isW ? 'on' : ''}" data-act="rper" data-v="week">Weekly</button><button class="${isW ? '' : 'on'}" data-act="rper" data-v="month">Monthly</button></div>`;
+    h += `<div class="mb14 row"><button class="btn small" data-act="rnav" data-d="-1">Previous</button><div class="m0 med tc f1 navt">${esc(r.title)}</div><button class="btn small" data-act="rnav" data-d="1" ${r.future ? 'disabled' : ''}>Next</button></div>`;
+    if (!r.all.length) return h + card('', `<p class="muted">Nothing was logged this ${unit}.</p>`);
+
+    const diff = r.tot - r.prevTot, pct = r.prevTot ? Math.round(Math.abs(diff) / r.prevTot * 100) : 0;
+    const cmp = !r.prevTot ? `Nothing was logged the ${unit} before.` : Math.abs(diff) < 0.005 ? `Same as last ${unit}.` : `${fm(diff)} ${diff > 0 ? 'more' : 'less'} than last ${unit} (${pct}%).`;
+    h += card('Total spent', `<p class="big">${fm(r.tot)}${r.plan ? ` <span class="muted med">of ${fm(r.plan)}</span>` : ''}</p>${r.plan ? bar(r.tot / r.plan, C.status(r.tot / r.plan)) : ''}<p class="${diff > 0 && r.prevTot ? 'r' : diff < 0 ? 'g' : 'muted'}">${cmp}</p>` +
+      `<div class="row item"><span>Purchases</span><b>${r.list.length}</b></div><div class="row item"><span>Average per day</span><b>${fm(r.tot / r.days)}</b></div>` +
+      (r.big ? `<div class="row item"><span>Biggest: ${esc(r.big.note || catName(r.big.cat))}</span><b>${fm(r.big.amount)}</b></div>` : ''));
+
+    if (isW) {
+      const fw = budgetOf().foodWeek, fs = r.byCat.food || 0;
+      if (fw) h += card('Food and fun', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fs / fw, C.status(fs / fw))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
+    }
+
+    const cats = Object.keys(r.byCat).sort((a, c) => r.byCat[c] - r.byCat[a]);
+    h += card('By category', cats.map((k) => {
+      const v = r.byCat[k], lim = isW ? 0 : budgetOf().amounts[k] || 0;
+      const pc = lim ? v / lim : r.tot ? v / r.tot : 0;
+      return `<div class="rline"><div class="row"><span>${esc(catName(k))}</span><b>${fm(v)}${lim ? ` <span class="muted small">of ${fm(lim)}</span>` : ''}</b></div>${bar(pc, lim ? C.status(pc) : 'b')}</div>`;
+    }).join('') || '<p class="muted">No counted spending.</p>');
+
+    const mx = Math.max(...r.buckets.map((b) => b.v), 0.01);
+    h += card(isW ? 'Day by day' : 'Week by week', r.buckets.map((b) => `<div class="rline"><div class="row"><span>${esc(b.n)}</span><b>${fm(b.v)}</b></div>${bar(b.v / mx, 'b')}</div>`).join(''));
+
+    if (r.top.length) h += card('Where it went', r.top.map((g) => `<div class="row item"><span>${esc(g.n)} <span class="muted small">${g.c}x</span></span><b>${fm(g.v)}</b></div>`).join(''));
+    const accts = Object.keys(r.byAcct);
+    if (accts.length > 1 || (accts.length && S.accounts.length > 1)) h += card('By account', accts.map((k) => `<div class="row item"><span>${esc(k)}</span><b>${fm(r.byAcct[k])}</b></div>`).join(''));
+
+    const ex = [['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
+    if (ex.length) h += card('Not counted in your budget', ex.map((x) => `<div class="row item"><span>${x[0]}</span><b>${fm(x[1])}</b></div>`).join(''));
+
+    const sv = [['Saved toward goals', r.saved], ['IOU payments back to you', r.iouIn]].filter((x) => x[1] > 0);
+    if (sv.length || !isW) h += card('Money in', (sv.map((x) => `<div class="row item"><span>${x[0]}</span><b class="g">${fm(x[1])}</b></div>`).join('') || '<p class="muted">No savings or IOU payments logged.</p>') + (!isW && plannedSavings() ? `<p class="muted small mt8">Savings plan this month: ${fm(plannedSavings())}. ${r.saved >= plannedSavings() ? 'You hit it.' : fm(plannedSavings() - r.saved) + ' short.'}</p>` : ''));
+
+    h += card('Everything logged', `<details class="rlist"><summary>Show all ${r.all.length} entries</summary>${r.all.slice().sort((a, c) => (c.date + c.id).localeCompare(a.date + a.id)).map((e) => `<div class="row item"><span>${C.shortDate(e.date)} · ${esc(e.note || catName(e.cat))}${counted(e) ? '' : ' <span class="muted small">not counted</span>'}</span><b>${fm(e.amount)}</b></div>`).join('')}</details>`);
+    h += `<div class="btns"><button class="btn" data-act="shareReport">Share summary</button><button class="btn" data-act="csvReport">Save as CSV</button></div>`;
     return h;
+  }
+
+  // Builds the numbers for the weekly or monthly report.
+  function report() {
+    const per = ui.rper || 'week', t = C.today();
+    let from, to, pFrom, pTo, title, buckets = [];
+    if (per === 'week') {
+      from = ui.rws || C.weekStart(t); to = C.addDays(from, 6);
+      pFrom = C.addDays(from, -7); pTo = C.addDays(from, -1);
+      title = C.shortDate(from) + ' to ' + C.shortDate(to);
+      for (let i = 0; i < 7; i++) { const d = C.addDays(from, i); buckets.push({ n: C.parse(d).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }), a: d, b: d, v: 0 }); }
+    } else {
+      const mk = ui.rmk || C.monthKey(t);
+      from = mk + '-01'; to = mk + '-' + pad(dim(mk));
+      const pk = C.shiftMonthKey(mk, -1); pFrom = pk + '-01'; pTo = pk + '-' + pad(dim(pk));
+      title = C.monthName(mk);
+      for (let d = from; d <= to; d = C.addDays(d, 7)) { const e = C.addDays(d, 6) > to ? to : C.addDays(d, 6); buckets.push({ n: C.shortDate(d) + ' to ' + C.shortDate(e), a: d, b: e, v: 0 }); }
+    }
+    const inR = (d) => d >= from && d <= to;
+    const all = S.expenses.filter((e) => inR(e.date));
+    const list = all.filter(counted);
+    const tot = C.round2(sum(list, (e) => e.amount));
+    const prevTot = C.round2(sum(S.expenses.filter((e) => counted(e) && e.date >= pFrom && e.date <= pTo), (e) => e.amount));
+    const byCat = {}, byAcct = {}, groups = {};
+    list.forEach((e) => {
+      byCat[e.cat] = (byCat[e.cat] || 0) + e.amount;
+      const a = S.accounts.find((x) => x.id === e.account), an = a ? a.name + (a.last4 ? ' ' + a.last4 : '') : 'No account';
+      byAcct[an] = (byAcct[an] || 0) + e.amount;
+      const k = (e.note || catName(e.cat)).trim().toLowerCase();
+      groups[k] = groups[k] || { n: e.note || catName(e.cat), v: 0, c: 0 }; groups[k].v += e.amount; groups[k].c++;
+      const bk = buckets.find((b) => e.date >= b.a && e.date <= b.b); if (bk) bk.v += e.amount;
+    });
+    const end = to < t ? to : t;
+    const days = Math.max(1, C.daysBetween(from, end) + 1);
+    const saved = sum(Object.values(S.goals), (g) => sum(g.contribs.filter((c) => inR(c.date)), (c) => c.amount));
+    const iouIn = sum(S.ious.filter((i) => i.dir === 'owedToMe'), (i) => sum((i.payments || []).filter((p) => p.date && inR(p.date)), (p) => p.amount));
+    const s = (f) => C.round2(sum(all.filter(f), (e) => e.amount));
+    return {
+      per, from, to, title, all, list, tot, prevTot, byCat, byAcct, buckets, days, saved, iouIn,
+      future: to >= t,
+      plan: per === 'week' ? 0 : plannedSpend(),
+      big: list.slice().sort((a, c) => c.amount - a.amount)[0],
+      top: Object.values(groups).sort((a, c) => c.v - a.v).slice(0, 5),
+      fromSav: s((e) => e.paidFromSavings && !e.household), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
+    };
+  }
+  function reportText(r) {
+    const lines = [(r.per === 'week' ? 'Week of ' : '') + r.title, 'Spent: ' + fm(r.tot) + (r.plan ? ' of ' + fm(r.plan) : ''), 'Last ' + r.per + ': ' + fm(r.prevTot), ''];
+    Object.keys(r.byCat).sort((a, c) => r.byCat[c] - r.byCat[a]).forEach((k) => lines.push(catName(k) + ': ' + fm(r.byCat[k])));
+    if (r.saved) lines.push('', 'Saved: ' + fm(r.saved));
+    return lines.join('\n');
+  }
+  function saveFile(text, name, type) {
+    const file = new File([text], name, { type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: name });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 
   function SecurityView() {
@@ -772,9 +852,31 @@
     wnav(d) { ui.wOff = Math.min(0, ui.wOff + +d.d); render(); },
     mnav(d) { ui.mk = C.shiftMonthKey(ui.mk || C.monthKey(C.today()), +d.d); render(); },
     bnav(d) { ui.bmk = C.shiftMonthKey(ui.bmk || C.monthKey(C.today()), +d.d); render(); },
-    rnav(d) { ui.rmk = C.shiftMonthKey(ui.rmk || C.monthKey(C.today()), +d.d); render(); },
+    rnav(d) {
+      const t = C.today();
+      if ((ui.rper || 'week') === 'week') { const n = C.addDays(ui.rws || C.weekStart(t), 7 * +d.d); if (n <= t) ui.rws = n; }
+      else { const n = C.shiftMonthKey(ui.rmk || C.monthKey(t), +d.d); if (n <= C.monthKey(t)) ui.rmk = n; }
+      render();
+    },
+    rper(d) { ui.rper = d.v; render(); },
+    async shareReport() {
+      const text = reportText(report());
+      try {
+        if (navigator.share) await navigator.share({ title: 'Spending report', text });
+        else { await navigator.clipboard.writeText(text); toast('Copied'); }
+      } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); }
+    },
+    async csvReport() {
+      const r = report(), q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const rows = [['Date', 'Description', 'Category', 'Account', 'Amount', 'Counted']].concat(r.all.slice().sort((a, c) => a.date.localeCompare(c.date)).map((e) => {
+        const a = S.accounts.find((x) => x.id === e.account);
+        return [e.date, e.note || '', catName(e.cat), a ? a.name : '', e.amount.toFixed(2), counted(e) ? 'yes' : 'no'];
+      }));
+      try { await saveFile(rows.map((x) => x.map(q).join(',')).join('\n'), 'money-' + r.per + '-' + r.from + '.csv', 'text/csv'); }
+      catch (e) { if (e && e.name !== 'AbortError') toast('Could not save'); }
+    },
     moreHist() { ui.hist += 40; render(); },
-    sundayWeek() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = -1; render(); },
+    sundayWeek() { ui.tab = 'more'; ui.more = 'recap'; ui.rper = 'week'; ui.rws = C.addDays(C.weekStart(C.today()), -7); render(); },
     sundayIous() { ui.tab = 'ious'; render(); },
     setPinNow() {
       openSheet(`<h2>Set a PIN</h2><form data-form="setpin"><label class="f">New 6 digit PIN</label><input type="password" name="n" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><label class="f">Repeat PIN</label><input type="password" name="n2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Set PIN</button></div></form>`);

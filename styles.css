@@ -119,3 +119,8 @@ html[data-theme=mint]{--g:#059669;--y:#d97706;--r:#dc2626}
 .tabbar .addtab .plus{width:42px;height:30px;border-radius:12px;background:var(--blue);color:var(--on,#06101f);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;line-height:1}
 .navt{font-size:19px;white-space:nowrap}
 @media (max-width:360px){.navt{font-size:16px}.tabbar button,.tabbar .addtab{font-size:11px}.tabbar svg{width:26px;height:26px}.tabbar .addtab .plus{height:26px;width:38px}.btn.small{padding:8px 10px;font-size:15px}}
+.rline{padding:8px 0}.rline .row{margin-bottom:6px}
+.rlist summary{cursor:pointer;font-weight:700;color:var(--blue);padding:4px 0 10px;list-style:none}
+.rlist summary::-webkit-details-marker{display:none}
+.rlist[open] summary{margin-bottom:4px}
+.btn:disabled{opacity:.4}
