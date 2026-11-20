@@ -663,9 +663,35 @@
     let h = '<div class="card inset">' + row('Bills and fixed costs', p.fixed) + (p.flex ? row('Shopping and other', p.flex) : '') + row(`Food and fun, ${p.weeks} week${p.weeks === 1 ? '' : 's'}`, p.food) +
       p.goals.map((g) => row('Save: ' + esc(S.goals[g.k] ? S.goals[g.k].name : g.k), g.v, 'g')).join('') +
       row(p.left < 0 ? 'Short by' : 'Left over, free to use', p.left, p.left < 0 ? 'r' : 'g') + '</div>';
-    if (p.left < 0) h += '<p class="small r">This check does not cover the plan. Trim food and fun or move less to savings this time.</p>';
+    if (p.left < 0) h += `<p class="small r">This check is ${fm(-p.left)} short of your plan. You can skip some savings this once, or fix the budget so future checks cover it.</p><button type="button" class="mt8 btn" data-act="fixBudget">Fix the budget for future checks</button>`;
     h += p.dueSoon.length ? `<p class="label mt">Due before your next check (${C.shortDate(p.next)})</p>` + p.dueSoon.sort((a, c) => (a.d < c.d ? -1 : 1)).map((x) => row(esc(x.b.name) + ', ' + C.shortDate(x.d), x.b.amount)).join('') : '<p class="muted small mt8">No bills with due days fall before your next check.</p>';
     return h;
+  }
+  // Ways to close a paycheck shortfall for good. Each returns the changes it would make to the monthly plan.
+  function fixOptions(short) {
+    const f = PER_MONTH[payFreq()] || 1, b = budgetOf(), wpm = 52 / 12;
+    const up = (x) => Math.ceil(x * 100 - 1e-6) / 100;
+    const cut = up(short * f);                       // monthly amount to free up
+    const food = (b.foodWeek || 0) * wpm;
+    const flexCats = S.cats.filter((c) => c.kind === 'flex' && c.id !== 'food' && (b.amounts[c.id] || 0) > 0);
+    const flex = sum(flexCats, (c) => b.amounts[c.id]);
+    const savKeys = Object.keys(b.savings).filter((k) => (b.savings[k] || 0) > 0);
+    const sav = sum(savKeys, (k) => b.savings[k]);
+    const opts = [];
+    const plan = (foodCut, flexCut, savCut) => {
+      const ch = [];
+      if (foodCut > 0) { const nw = Math.max(0, C.round2(b.foodWeek - up(foodCut / wpm))); ch.push({ kind: 'food', label: 'Food and fun', from: b.foodWeek, to: nw, unit: 'a week' }); }
+      if (flexCut > 0) flexCats.forEach((c) => { const v = b.amounts[c.id]; ch.push({ kind: 'cat', id: c.id, label: catName(c.id), from: v, to: Math.max(0, C.round2(v - up(flexCut * v / flex))), unit: 'a month' }); });
+      if (savCut > 0) savKeys.forEach((k) => { const v = b.savings[k]; ch.push({ kind: 'sav', id: k, label: 'Save to ' + (S.goals[k] ? S.goals[k].name : k), from: v, to: Math.max(0, C.round2(v - up(savCut * v / sav))), unit: 'a month' }); });
+      return ch;
+    };
+    if (food >= cut) opts.push({ t: 'Spend less on food and fun', ch: plan(cut, 0, 0) });
+    if (flex >= cut) opts.push({ t: 'Trim shopping and other', ch: plan(0, cut, 0) });
+    if (sav >= cut) opts.push({ t: 'Save a little less', ch: plan(0, 0, cut) });
+    const tot = food + flex + sav;
+    const kinds = [food, flex, sav].filter((x) => x > 0).length;
+    if (tot >= cut && kinds > 1) opts.push({ t: kinds === 3 ? 'Spread it across all three' : 'Split it between both', ch: plan(cut * food / tot, cut * flex / tot, cut * sav / tot) });
+    return { cut, opts };
   }
   async function shrinkImage(file) {
     const url = URL.createObjectURL(file);
@@ -1159,8 +1185,31 @@
       const a = document.createElement('a'); a.href = url; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
     },
     async icsShare() { try { await saveFile(icsText(), 'money-reminders.ics', 'text/calendar'); } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); } },
-    paycheck() {
-      const t = C.today(), amt = perCheck(), hasChk = S.accounts.some((a) => a.type === 'checking');
+    fixBudget() {
+      const f = $('#sheet form[data-form=paycheck]'); if (!f) return;
+      const fd = new FormData(f), amt = C.round2(C.num(fd.get('amount'))), date = fd.get('date') || C.today();
+      const p = payPlan(amt, date); if (p.left >= 0) return;
+      ui.fixPay = { amt, date };
+      const o = fixOptions(-p.left);
+      ui.fixOpts = o.opts;
+      openSheet(`<h2>Fix the budget</h2><p class="muted">This check is ${fm(-p.left)} short. To cover it every payday, your ${S.mode === 'school' ? 'School year' : 'Summer'} plan needs ${fm(o.cut)} less a month. Pick one:</p>` +
+        (o.opts.length ? o.opts.map((x, i) => card(x.t, x.ch.map((c) => `<div class="row item"><span>${esc(c.label)}</span><b>${fm(c.from)} to ${fm(c.to)} <span class="muted small">${c.unit}</span></b></div>`).join('') + `<button class="mt8 btn primary" data-act="fixApply" data-i="${i}">Use this</button>`, 'inset')).join('')
+          : '<p class="r">There is not enough in food and fun, shopping, and savings to cover it. Lower a fixed bill in Budget and income, or check your take home amount.</p>') +
+        `<button class="mt btn" data-act="fixKeep">Leave the budget, this check was just low</button>`);
+    },
+    fixApply(d) {
+      const x = ui.fixOpts && ui.fixOpts[+d.i]; if (!x) return;
+      const b = budgetOf(), wpm = 52 / 12;
+      x.ch.forEach((c) => {
+        if (c.kind === 'food') { b.foodWeek = c.to; b.amounts.food = C.round2(c.to * wpm); }
+        else if (c.kind === 'cat') b.amounts[c.id] = c.to;
+        else b.savings[c.id] = c.to;
+      });
+      save(); render(); toast('Budget updated'); actions.paycheck(ui.fixPay);
+    },
+    fixKeep() { actions.paycheck(ui.fixPay); },
+    paycheck(pre) {
+      const t = pre && pre.date ? pre.date : C.today(), amt = pre && pre.amt ? pre.amt : perCheck(), hasChk = S.accounts.some((a) => a.type === 'checking');
       openSheet(`<h2>I got paid</h2><p class="muted">See where this paycheck should go before you spend any of it.</p><form data-form="paycheck" data-live="pay"><label class="f">Take home amount</label><input class="amount" type="text" inputmode="decimal" name="amount" value="${amt ? amt.toFixed(2) : ''}" placeholder="0.00" autocomplete="off"><label class="f">Payday</label><input type="date" name="date" value="${t}"><div id="payout">${payPlanHTML(amt, t)}</div><label class="mt check"><input type="checkbox" name="toGoals" checked>Log the savings part to my goals</label>${hasChk ? `<label class="check"><input type="checkbox" name="toChk" ${S.autoBal ? 'checked' : ''}>Add it to my checking balance</label>` : ''}<div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
       applyWidths();
     },
