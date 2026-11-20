@@ -457,13 +457,14 @@
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
       card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
-      card('Lock', `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><div id="facebox"></div>`) +
-      card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage. ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
+      card('Lock', V.isAuto() ? `<p class="muted">No lock is on. Anyone holding your unlocked phone can open this app.</p><div class="btns"><button class="btn primary" data-act="setPinNow">Set a PIN</button></div>` : `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><button class="btn mt" data-act="removePin">Remove PIN, no lock</button><div id="facebox"></div>`) +
+      card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
       card('Danger zone', '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p><button class="btn danger" style="margin-top:10px" data-act="erase">Erase all data</button>');
   }
   async function fillFaceBox() {
     const box = $('#facebox'); if (!box) return;
+    if (V.isAuto()) { box.innerHTML = ''; return; }
     if (!(await V.faceSupported())) { box.innerHTML = ''; return; }
     const on = await V.faceEnabled();
     box.innerHTML = `<button class="btn" style="margin-top:10px" data-act="${on ? 'faceOff' : 'faceOn'}">${on ? 'Turn off Face ID' : 'Turn on Face ID'}</button>`;
@@ -686,6 +687,14 @@
       S.setupDone = true; save(); closeSheet(); render(); setupDone();
     },
     async setup(fd) {
+      if (fd.get('nolock')) {
+        $('#lockbtn').disabled = true;
+        S = defaultState();
+        await V.createAuto(S);
+        setPinHint(false);
+        startSession();
+        return;
+      }
       const p = fd.get('p') || '', p2 = fd.get('p2') || '', err = $('#lockerr');
       if (!/^\d{6}$/.test(p)) { err.textContent = 'Use exactly 6 digits'; return; }
       if (p !== p2) { err.textContent = 'PINs do not match'; return; }
@@ -699,6 +708,17 @@
       const err = $('#lockerr'); err.textContent = ''; $('#lockbtn').disabled = true; $('#lockbtn').textContent = 'Checking';
       try { const st = await V.unlock(fd.get('p') || ''); S = Object.assign(defaultState(), st || {}); startSession(); }
       catch (e) { fails++; await new Promise((r) => setTimeout(r, Math.min(4000, fails * 600))); err.textContent = pinHintOn() ? 'That PIN is not right' : 'That passcode is not right'; const pf = $('input[name=p]'); if (pf) { pf.value = ''; pf.focus(); } $('#lockbtn').disabled = false; $('#lockbtn').textContent = 'Unlock'; }
+    },
+    async setpin(fd) {
+      const n = fd.get('n') || '';
+      if (!/^\d{6}$/.test(n)) { toast('Use exactly 6 digits'); return; }
+      if (n !== fd.get('n2')) { toast('PINs do not match'); return; }
+      try { await flush(); await V.setPass(n, S); setPinHint(true); closeSheet(); render(); toast('PIN is on'); }
+      catch (e) { toast(e.message); }
+    },
+    async rmpin(fd) {
+      try { await flush(); await V.makeAuto(fd.get('o') || '', S); setPinHint(false); closeSheet(); render(); toast('PIN removed'); }
+      catch (e) { toast(e.message); }
     },
     async chpass(fd) {
       const n = fd.get('n') || '';
@@ -743,6 +763,12 @@
     moreHist() { ui.hist += 40; render(); },
     sundayWeek() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = -1; render(); },
     sundayIous() { ui.tab = 'ious'; render(); },
+    setPinNow() {
+      openSheet(`<h2>Set a PIN</h2><form data-form="setpin"><label class="f">New 6 digit PIN</label><input type="password" name="n" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><label class="f">Repeat PIN</label><input type="password" name="n2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Set PIN</button></div></form>`);
+    },
+    removePin() {
+      openSheet(`<h2>Remove PIN</h2><p class="muted">The app will open without asking for anything. Your data stays on this phone, but anyone who opens the app can see it.</p><form data-form="rmpin"><label class="f">Current PIN</label><input type="password" name="o" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn danger" type="submit">Remove</button></div></form>`);
+    },
     setupMahi() { setupForm(); },
     setupNew() {
       S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup });
@@ -900,16 +926,19 @@
     if (el.id === 'bkfile' && el.files[0]) {
       try { ui.pendingBackup = await el.files[0].text(); JSON.parse(ui.pendingBackup); } catch (e) { toast('That is not a backup file'); return; }
       el.value = '';
-      openSheet(`<h2>Restore backup</h2><p class="muted">This replaces everything on this device with the backup. Enter the passcode the backup was made with.</p><form data-form="restore"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Restore</button></div></form>`);
+      openSheet(`<h2>Restore backup</h2><p class="muted">This replaces everything on this device with the backup. Enter the PIN the backup was made with. Leave it empty if the backup was made with no PIN.</p><form data-form="restore"><input type="password" name="p" autocomplete="current-password" placeholder="PIN, or empty"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Restore</button></div></form>`);
     }
   });
 
   // ---------- lock / session ----------
   function showLock(forceUnlock) {
     V.exists().then(async (exists) => {
+      if (exists && (await V.mode()) === 'auto') {
+        try { const st = await V.unlockAuto(); S = Object.assign(defaultState(), st || {}); startSession(); return; } catch (e) { /* fall through to the normal screen */ }
+      }
       const face = exists && (await V.faceEnabled());
       const pin = exists && getPinHint();
-      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="btn" name="persona" value="blank" type="submit" style="margin-top:10px">I\'m not Mahi</button><p class="muted small" style="margin-top:12px">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="btn" style="margin-top:12px" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
+      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="btn" name="persona" value="blank" type="submit" style="margin-top:10px">I\'m not Mahi</button><p class="muted small" style="margin-top:12px">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="btn" style="margin-top:12px" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
       const p = $('input[name=p]'); if (p) setTimeout(() => p.focus(), 50);
       if (face && !forceUnlock) { /* user taps the button to start Face ID */ }
     });
@@ -928,7 +957,7 @@
   document.addEventListener('visibilitychange', async () => {
     document.body.classList.toggle('hidden', document.hidden);
     if (document.hidden) { hiddenAt = Date.now(); await flush(); }
-    else if (S && hiddenAt && Date.now() - hiddenAt > MIN5) lock();
+    else if (S && hiddenAt && Date.now() - hiddenAt > MIN5 && !V.isAuto()) lock();
   });
   window.addEventListener('pagehide', () => { hiddenAt = hiddenAt || Date.now(); flush(); });
 

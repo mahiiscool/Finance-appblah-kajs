@@ -52,12 +52,48 @@
   const open = async (k, box) => JSON.parse(dec.decode(await subtle().decrypt({ name: 'AES-GCM', iv: fromB64(box.iv) }, k, fromB64(box.ct))));
 
   let key = null;
+  let auto = false;
+  const AUTO_ITER = 1000;
 
   const Vault = {
     ITER,
     exists: async () => !!(await kvGet('meta')),
     isUnlocked: () => !!key,
     lock: () => { key = null; },
+    isAuto: () => auto,
+    mode: async () => { const m = await kvGet('meta'); return m && m.auto ? 'auto' : 'pin'; },
+
+    // No lock mode: a random secret kept on this device stands in for the passcode.
+    createAuto: async (state) => {
+      const secret = toB64(rand(32)), salt = rand(16);
+      const k = await toKey(await deriveBits(secret, salt, AUTO_ITER));
+      await kvPut('meta', { salt: toB64(salt), iter: AUTO_ITER, check: await seal(k, { ok: 1 }), face: null, auto: secret });
+      key = k; auto = true;
+      await Vault.save(state);
+    },
+    unlockAuto: async () => {
+      const meta = await kvGet('meta');
+      if (!meta || !meta.auto) throw new Error('No vault');
+      const k = await toKey(await deriveBits(meta.auto, fromB64(meta.salt), meta.iter));
+      await open(k, meta.check);
+      const blob = await kvGet('blob');
+      const state = blob ? await open(k, blob) : null;
+      key = k; auto = true;
+      return state;
+    },
+    makeAuto: async (oldPass, state) => {
+      const meta = await kvGet('meta');
+      const ok = await toKey(await deriveBits(oldPass, fromB64(meta.salt), meta.iter));
+      try { await open(ok, meta.check); } catch (e) { throw new Error('Wrong passcode'); }
+      await Vault.createAuto(state);
+    },
+    setPass: async (newPass, state) => {
+      const salt = rand(16);
+      const k = await toKey(await deriveBits(newPass, salt, ITER));
+      await kvPut('meta', { salt: toB64(salt), iter: ITER, check: await seal(k, { ok: 1 }), face: null });
+      key = k; auto = false;
+      await Vault.save(state);
+    },
 
     create: async (pass, state) => {
       const salt = rand(16);
@@ -74,7 +110,7 @@
       try { await open(k, meta.check); } catch (e) { throw new Error('Wrong passcode'); }
       const blob = await kvGet('blob');
       const state = blob ? await open(k, blob) : null;
-      key = k;
+      key = k; auto = false;
       return state;
     },
 
@@ -90,28 +126,29 @@
       const salt = rand(16);
       const k = await toKey(await deriveBits(newPass, salt, ITER));
       await kvPut('meta', { salt: toB64(salt), iter: ITER, check: await seal(k, { ok: 1 }), face: null });
-      key = k;
+      key = k; auto = false;
       await Vault.save(state);
     },
 
     exportBackup: async () => {
       const meta = await kvGet('meta'); const blob = await kvGet('blob');
-      return JSON.stringify({ app: 'money', v: 1, meta: { salt: meta.salt, iter: meta.iter, check: meta.check }, blob });
+      return JSON.stringify({ app: 'money', v: 1, meta: { salt: meta.salt, iter: meta.iter, check: meta.check, auto: meta.auto }, blob });
     },
 
     importBackup: async (text, pass) => {
       const data = JSON.parse(text);
       if (!data || data.app !== 'money' || !data.meta || !data.blob) throw new Error('Not a backup file');
-      const k = await toKey(await deriveBits(pass, fromB64(data.meta.salt), data.meta.iter));
+      const secret = data.meta.auto || pass;
+      const k = await toKey(await deriveBits(secret, fromB64(data.meta.salt), data.meta.iter));
       try { await open(k, data.meta.check); } catch (e) { throw new Error('Wrong backup passcode'); }
       const state = await open(k, data.blob);
-      await kvPut('meta', { salt: data.meta.salt, iter: data.meta.iter, check: data.meta.check, face: null });
+      await kvPut('meta', { salt: data.meta.salt, iter: data.meta.iter, check: data.meta.check, face: null, auto: data.meta.auto });
       await kvPut('blob', data.blob);
-      key = k;
+      key = k; auto = !!data.meta.auto;
       return state;
     },
 
-    wipe: async () => { key = null; await kvClear(); },
+    wipe: async () => { key = null; auto = false; await kvClear(); },
 
     // Optional Face ID through WebAuthn with the PRF extension. The passcode derived key is
     // wrapped by a key only the platform authenticator can reproduce.
