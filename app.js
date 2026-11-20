@@ -356,7 +356,7 @@
     if (v === 'rules') return RulesView();
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
-    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Text size, security and backup'], ['bank', 'Automatic bank connection']];
+    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Theme, text size, security and backup'], ['bank', 'Automatic bank connection']];
     return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`);
   }
 
@@ -454,7 +454,8 @@
 
   function SecurityView() {
     return back() + `<h1 class="title">Security and backup</h1><div class="sub">Your data never leaves this device</div>` +
-      card('Text size', `<input type="range" id="uiscale" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}" style="width:100%"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small" style="margin-top:10px" data-act="resetScale">Reset to 100%</button>`) +
+      card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
+      card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
       card('Lock', `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change passcode</button></div><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage. ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
@@ -903,6 +904,18 @@
     const o = $('#uiscaleval'); if (o) o.textContent = Math.round(v * 100) + '%';
   });
   actions.resetScale = () => { setScale(1); const r = $('#uiscale'); if (r) r.value = 100; const o = $('#uiscaleval'); if (o) o.textContent = '100%'; };
+  const THEMES = [['auto', 'Auto', '#5b9bff'], ['midnight', 'Midnight', '#5b9bff'], ['black', 'Black', '#111'], ['light', 'Light', '#2563eb'], ['paper', 'Paper', '#b45309'], ['mint', 'Mint', '#059669'], ['forest', 'Forest', '#34d399'], ['ocean', 'Ocean', '#22d3ee'], ['grape', 'Grape', '#a78bfa'], ['rose', 'Rose', '#fb7185'], ['sunset', 'Sunset', '#fb923c']];
+  const BARS = { midnight: '#0a1120', black: '#000000', light: '#eef2fa', paper: '#f6f1e7', mint: '#eaf7f1', forest: '#07140e', ocean: '#06141a', grape: '#120b1f', rose: '#1a0b12', sunset: '#1a0f08' };
+  function getTheme() { try { const t = localStorage.getItem('moneytheme'); return THEMES.some((x) => x[0] === t) ? t : 'auto'; } catch (e) { return 'auto'; } }
+  function applyTheme(t) {
+    const h = document.documentElement;
+    if (t === 'auto') h.removeAttribute('data-theme'); else h.setAttribute('data-theme', t);
+    const light = ['light', 'paper', 'mint'].includes(t);
+    const cs = document.querySelector('meta[name=color-scheme]'); if (cs) cs.setAttribute('content', t === 'auto' ? 'dark light' : light ? 'light' : 'dark');
+    const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', BARS[t] || (matchMedia('(prefers-color-scheme: light)').matches ? '#eef2fa' : '#0a1120'));
+  }
+  actions.setTheme = (d) => { try { localStorage.setItem('moneytheme', d.v); } catch (e) {} applyTheme(d.v); render(); };
+  applyTheme(getTheme());
   applyScale(getScale());
 
   // ---------- boot ----------
