@@ -194,10 +194,11 @@
     let inner = `<p class="big ${sp > lim && lim ? 'r' : ''}">${fm(sp)} <span class="muted med">of ${fm(lim)}</span></p>${lim ? bar(pct, cls) : ''}`;
     if (fills.length) {
       inner += `<p class="muted">${fills.length} fill up${fills.length === 1 ? '' : 's'}, about ${fm(sp / fills.length)} each. Last one ${C.shortDate(fills[0].date)}.</p>`;
-      if (lim) inner += sp > lim ? `<p class="r">${fm(sp - lim)} over your gas budget.</p>` : day >= 7 ? `<p class="${pace > lim ? 'y' : 'g'}">On pace for ${fm(pace)} this month${pace > lim ? ', ' + fm(pace - lim) + ' over' : ''}.</p>` : `<p class="muted">${fm(lim - sp)} left for gas this month.</p>`;
+      if (lim) inner += sp > lim ? `<p class="r">${fm(sp - lim)} over your gas budget.</p>` : day >= 7 ? `<p class="${pace > lim ? 'y' : 'g'}">On pace for ${fm(pace)} this month${pace > lim ? ', ' + fm(pace - lim) + ' over' : ', so about ' + fm(lim - pace) + ' goes to savings'}.</p>` : `<p class="muted">${fm(lim - sp)} left for gas this month.</p>`;
     } else inner += '<p class="muted">No fill ups logged this month.</p>';
     const prev = [1, 2, 3].map((n) => { const k = C.shiftMonthKey(mk, -n); return { k, v: monthSpend(k).gas || 0 }; }).filter((x) => x.v > 0);
-    if (prev.length) inner += '<p class="label mt">Past months</p>' + prev.map((x) => `<div class="row item"><span>${C.monthName(x.k)}</span><b class="${lim && x.v > lim ? 'r' : ''}">${fm(x.v)}</b></div>`).join('');
+    if (prev.length) inner += '<p class="label mt">Past months</p>' + prev.map((x) => `<div class="row item"><span>${C.monthName(x.k)}</span><b class="${lim && x.v > lim ? 'r' : ''}">${fm(x.v)}${lim ? ` <span class="small ${x.v > lim ? 'r' : 'g'}">${x.v > lim ? fm(x.v - lim) + ' over' : fm(lim - x.v) + ' saved'}</span>` : ''}</b></div>`).join('');
+    if (lim) inner += '<p class="muted small mt8">Gas money you do not use goes to your savings at the end of the month.</p>';
     return card('Gas this month', inner + '<button class="mt btn primary" data-act="logGas">Log a fill up</button>');
   }
   // Past full weeks of spending money, newest first.
