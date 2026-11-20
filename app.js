@@ -457,7 +457,7 @@
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
       card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
-      card('Lock', `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change passcode</button></div><div id="facebox"></div>`) +
+      card('Lock', `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage. ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
       card('Danger zone', '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p><button class="btn danger" style="margin-top:10px" data-act="erase">Erase all data</button>');
@@ -663,8 +663,9 @@
     afford(fd, form) { /* live only */ },
     async setup(fd) {
       const p = fd.get('p') || '', p2 = fd.get('p2') || '', err = $('#lockerr');
-      if (p.length < 6) { err.textContent = 'Use at least 6 characters'; return; }
-      if (p !== p2) { err.textContent = 'Passcodes do not match'; return; }
+      if (!/^\d{6}$/.test(p)) { err.textContent = 'Use exactly 6 digits'; return; }
+      if (p !== p2) { err.textContent = 'PINs do not match'; return; }
+      setPinHint(true);
       err.textContent = ''; $('#lockbtn').textContent = 'Creating'; $('#lockbtn').disabled = true;
       S = fd.get('persona') === 'blank' ? blankState() : defaultState();
       await V.create(p, S);
@@ -673,13 +674,13 @@
     async unlock(fd) {
       const err = $('#lockerr'); err.textContent = ''; $('#lockbtn').disabled = true; $('#lockbtn').textContent = 'Checking';
       try { const st = await V.unlock(fd.get('p') || ''); S = Object.assign(defaultState(), st || {}); startSession(); }
-      catch (e) { fails++; await new Promise((r) => setTimeout(r, Math.min(4000, fails * 600))); err.textContent = 'That passcode is not right'; $('#lockbtn').disabled = false; $('#lockbtn').textContent = 'Unlock'; }
+      catch (e) { fails++; await new Promise((r) => setTimeout(r, Math.min(4000, fails * 600))); err.textContent = pinHintOn() ? 'That PIN is not right' : 'That passcode is not right'; const pf = $('input[name=p]'); if (pf) { pf.value = ''; pf.focus(); } $('#lockbtn').disabled = false; $('#lockbtn').textContent = 'Unlock'; }
     },
     async chpass(fd) {
       const n = fd.get('n') || '';
-      if (n.length < 6) { toast('Use at least 6 characters'); return; }
-      if (n !== fd.get('n2')) { toast('New passcodes do not match'); return; }
-      try { await flush(); await V.changePass(fd.get('o') || '', n, S); closeSheet(); toast('Passcode changed. Face ID was turned off.'); fillFaceBox(); }
+      if (!/^\d{6}$/.test(n)) { toast('Use exactly 6 digits'); return; }
+      if (n !== fd.get('n2')) { toast('New PINs do not match'); return; }
+      try { await flush(); await V.changePass(fd.get('o') || '', n, S); setPinHint(true); closeSheet(); toast('PIN changed. Face ID was turned off.'); fillFaceBox(); }
       catch (e) { toast(e.message); }
     },
     async faceon(fd) {
@@ -789,7 +790,7 @@
     // security
     lockNow() { lock(); },
     changePass() {
-      openSheet(`<h2>Change passcode</h2><form data-form="chpass"><label class="f">Current passcode</label><input type="password" name="o" autocomplete="current-password" required><label class="f">New passcode</label><input type="password" name="n" autocomplete="new-password" required><label class="f">Repeat new passcode</label><input type="password" name="n2" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Change</button></div></form>`);
+      openSheet(`<h2>Change PIN</h2><form data-form="chpass"><label class="f">Current passcode or PIN</label><input type="password" name="o" autocomplete="current-password" required><label class="f">New 6 digit PIN</label><input type="password" name="n" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><label class="f">Repeat new PIN</label><input type="password" name="n2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Change</button></div></form>`);
     },
     faceOn() {
       openSheet(`<h2>Turn on Face ID</h2><p class="muted">Enter your passcode once to link it.</p><form data-form="faceon"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Continue</button></div></form>`);
@@ -875,7 +876,8 @@
   function showLock(forceUnlock) {
     V.exists().then(async (exists) => {
       const face = exists && (await V.faceEnabled());
-      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a passcode'}</h1><p class="muted">${exists ? 'Enter your passcode to unlock.' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="Passcode" required>${exists ? '' : '<input type="password" name="p2" autocomplete="new-password" placeholder="Repeat passcode" style="margin-top:10px" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="btn" name="persona" value="blank" type="submit" style="margin-top:10px">I\'m not Mahi</button><p class="muted small" style="margin-top:12px">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="btn" style="margin-top:12px" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
+      const pin = exists && getPinHint();
+      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="btn" name="persona" value="blank" type="submit" style="margin-top:10px">I\'m not Mahi</button><p class="muted small" style="margin-top:12px">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="btn" style="margin-top:12px" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
       const p = $('input[name=p]'); if (p) setTimeout(() => p.focus(), 50);
       if (face && !forceUnlock) { /* user taps the button to start Face ID */ }
     });
@@ -896,6 +898,16 @@
   window.addEventListener('pagehide', () => { hiddenAt = hiddenAt || Date.now(); flush(); });
 
   // ---------- display size (per device, not encrypted so it applies on the lock screen too) ----------
+  function pinHintOn() { try { return localStorage.getItem('moneypin') === '1'; } catch (e) { return false; } }
+  function getPinHint() { return pinHintOn(); }
+  function setPinHint(v) { try { if (v) localStorage.setItem('moneypin', '1'); else localStorage.removeItem('moneypin'); } catch (e) {} }
+  document.addEventListener('input', (ev) => {
+    const el = ev.target;
+    if (el.name === 'p' && el.dataset && el.dataset.auto === '1') {
+      el.value = el.value.replace(/\D/g, '');
+      if (el.value.length === 6 && el.form) el.form.requestSubmit();
+    }
+  });
   function getScale() { try { const v = parseFloat(localStorage.getItem('moneyui')); return v >= 0.7 && v <= 1.3 ? v : 1; } catch (e) { return 1; } }
   function applyScale(v) { document.documentElement.style.zoom = v === 1 ? '' : String(v); }
   function setScale(v) { try { localStorage.setItem('moneyui', String(v)); } catch (e) {} applyScale(v); }
