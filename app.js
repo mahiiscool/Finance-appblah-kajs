@@ -33,7 +33,7 @@
 
   // ---------- default data ----------
   function defaultState() {
-    const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 0, amazon: 0, other: 0 };
+    const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 0, fun: 0, shop: 0, amazon: 0, other: 0 };
     return {
       v: 1, persona: 'mahi', mode: 'school',
       cats: [
@@ -41,7 +41,7 @@
         { id: 'flexpay', name: 'Flex pay', kind: 'fixed' }, { id: 'dad', name: "Dad's payment", kind: 'fixed' },
         { id: 'phone', name: 'Phone', kind: 'fixed' }, { id: 'gym', name: 'Gym', kind: 'fixed' },
         { id: 'haircut', name: 'Haircut', kind: 'fixed' }, { id: 'subs', name: 'Subscriptions', kind: 'fixed' },
-        { id: 'food', name: 'Food', kind: 'flex' }, { id: 'amazon', name: 'Amazon essentials', kind: 'flex' },
+        { id: 'food', name: 'Food', kind: 'flex' }, { id: 'fun', name: 'Fun and going out', kind: 'flex' }, { id: 'shop', name: 'Shopping', kind: 'flex' }, { id: 'amazon', name: 'Amazon essentials', kind: 'flex' },
         { id: 'other', name: 'Other', kind: 'flex' }
       ],
       budget: {
@@ -88,7 +88,7 @@
     s.persona = 'blank';
     s.cats = s.cats.filter((c) => c.id !== 'flexpay' && c.id !== 'dad');
     s.cats.find((c) => c.id === 'haircut').name = 'Personal care';
-    s.cats.find((c) => c.id === 'amazon').name = 'Shopping';
+    s.cats.find((c) => c.id === 'amazon').name = 'Online orders';
     ['school', 'summer'].forEach((m) => {
       const b = s.budget[m];
       Object.keys(b.amounts).forEach((k) => { b.amounts[k] = 0; });
@@ -146,11 +146,36 @@
     if (fw > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>`;
     return h;
   }
+  // Where this week's spending money went, by type.
+  function weekBreakdown(ws) {
+    const we = C.addDays(ws, 6), by = {};
+    S.expenses.forEach((e) => { if (counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we) by[e.cat] = (by[e.cat] || 0) + e.amount; });
+    const keys = Object.keys(by).sort((a, c) => by[c] - by[a]); if (!keys.length) return '';
+    const tot = sum(keys, (k) => by[k]);
+    return '<p class="label mt">Where it went</p>' + keys.map((k) => `<div class="rline"><div class="row"><span>${esc(catName(k))}</span><b>${fm(by[k])} <span class="muted small">${Math.round(by[k] / tot * 100)}%</span></b></div>${bar(by[k] / tot, 'b')}</div>`).join('');
+  }
+  function gasCard() {
+    const gas = S.cats.find((c) => c.id === 'gas'); if (!gas) return '';
+    const t = C.today(), mk = C.monthKey(t), lim = budgetOf().amounts.gas || 0;
+    const fills = S.expenses.filter((e) => counted(e) && e.cat === 'gas' && C.monthKey(e.date) === mk).sort((a, c) => (a.date < c.date ? 1 : -1));
+    if (!lim && !fills.length) return '';
+    const sp = C.round2(sum(fills, (e) => e.amount)), day = +t.slice(8), days = dim(mk), pace = C.round2(sp / day * days);
+    const pct = lim ? sp / lim : 0, cls = C.status(pct);
+    let inner = `<p class="big ${sp > lim && lim ? 'r' : ''}">${fm(sp)} <span class="muted med">of ${fm(lim)}</span></p>${lim ? bar(pct, cls) : ''}`;
+    if (fills.length) {
+      inner += `<p class="muted">${fills.length} fill up${fills.length === 1 ? '' : 's'}, about ${fm(sp / fills.length)} each. Last one ${C.shortDate(fills[0].date)}.</p>`;
+      if (lim) inner += sp > lim ? `<p class="r">${fm(sp - lim)} over your gas budget.</p>` : day >= 7 ? `<p class="${pace > lim ? 'y' : 'g'}">On pace for ${fm(pace)} this month${pace > lim ? ', ' + fm(pace - lim) + ' over' : ''}.</p>` : `<p class="muted">${fm(lim - sp)} left for gas this month.</p>`;
+    } else inner += '<p class="muted">No fill ups logged this month.</p>';
+    const prev = [1, 2, 3].map((n) => { const k = C.shiftMonthKey(mk, -n); return { k, v: monthSpend(k).gas || 0 }; }).filter((x) => x.v > 0);
+    if (prev.length) inner += '<p class="label mt">Past months</p>' + prev.map((x) => `<div class="row item"><span>${C.monthName(x.k)}</span><b class="${lim && x.v > lim ? 'r' : ''}">${fm(x.v)}</b></div>`).join('');
+    return card('Gas this month', inner + '<button class="mt btn primary" data-act="logGas">Log a fill up</button>');
+  }
   // Past full weeks of spending money, newest first.
   function pastWeeks(n) {
     const out = [], cur = C.weekStart(C.today());
-    if (!S.expenses.length) return out;
-    const first = C.weekStart(S.expenses.map((e) => e.date).sort()[0]);
+    const flexDates = S.expenses.filter((e) => counted(e) && isFlex(e.cat)).map((e) => e.date).sort();
+    if (!flexDates.length) return out;
+    const first = C.weekStart(flexDates[0]);
     for (let i = 1; i <= n; i++) {
       const ws = C.addDays(cur, -7 * i);
       if (ws < first) break;
@@ -282,7 +307,7 @@
     h += `<div class="seg"><button class="${S.mode === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${S.mode === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
 
     const ws = C.weekStart(t);
-    h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn" data-act="weekDetail">This week</button><button class="btn primary" data-act="add">Log spending</button></div>');
+    h += card('Spending money this week', weekHero(ws, true) + weekBreakdown(ws) + '<div class="btns"><button class="btn" data-act="weekDetail">This week</button><button class="btn primary" data-act="add">Log spending</button></div>');
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
       h += card('Sunday review', `<p class="med">Review the week and settle up</p>${(() => { const w = pastWeeks(1)[0]; return w ? `<p class="${w.sp > w.lim ? 'r' : 'g'}">Last week: ${fm(w.sp)} of ${fm(w.lim)}, ${fm(Math.abs(w.lim - w.sp))} ${w.sp > w.lim ? 'over' : 'under'}.</p>` : ''; })()}<p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
@@ -301,6 +326,7 @@
       h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>${payName()} has ${fm(payPool())}. You are short ${fm(cardsOwed() - payPool())} before you pay them off.</p>`, 'warn');
     }
 
+    h += gasCard();
     const pw = pastWeeks(4), under = pw.filter((w) => w.sp <= w.lim).length;
     if (pw.length) h += card('Recent weeks', `<p class="med">${under} of ${pw.length} week${pw.length === 1 ? '' : 's'} under ${fm(budgetOf().foodWeek)}</p>` + pw.map((w) => `<div class="row item"><span>${C.shortDate(w.ws)}</span><b class="${w.sp > w.lim ? 'r' : 'g'}">${fm(w.sp)} <span class="muted small">${w.sp > w.lim ? fm(w.sp - w.lim) + ' over' : fm(w.lim - w.sp) + ' under'}</span></b></div>`).join(''));
 
@@ -336,7 +362,7 @@
   function WeekView() {
     const ws = C.weekStart(C.addDays(C.today(), ui.wOff * 7)), we = C.addDays(ws, 6), b = budgetOf();
     let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
-    h += card('Spending money', weekHero(ws, ui.wOff === 0));
+    h += card('Spending money', weekHero(ws, ui.wOff === 0) + weekBreakdown(ws));
     const list = S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
     h += card('Spent this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
     const pw = pastWeeks(8);
@@ -517,6 +543,7 @@
     if (m === 'school') h += card('Income', `<label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" data-path="budget.school.income" data-t="n" data-re="1" value="${b.income}"><label class="f">How often you get paid</label><select data-path="payFreq" data-t="s" data-re="1">${FREQS.map((o) => `<option value="${o[0]}" ${S.payFreq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted small">Bonus money like tips is logged separately and never counted as income.</p>`);
     else h += card(mahi() ? 'Toyota co op pay' : 'Summer job pay', `<label class="f">Pay per check</label><input type="text" inputmode="decimal" data-path="budget.summer.pay" data-t="n" data-re="1" value="${b.pay || ''}"><label class="f">How often</label><select data-path="budget.summer.freq" data-t="s" data-re="1">${[['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Monthly']].map((o) => `<option value="${o[0]}" ${b.freq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted">About ${fm(incomeOf('summer'))} a month.</p>`);
     h += card('Weekly spending money', `<input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}"><p class="muted small">One limit for food, Amazon, and anything else that is not a bill. About ${fm(poolMonth(m))} a month.</p>`);
+    h += card('Spending types', '<p class="muted small">The kinds of things your weekly money goes to. Rename them or add your own.</p>' + S.cats.map((c, i) => c.kind !== 'flex' ? '' : `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" value="${esc(c.name)}">${c.id === 'other' ? '' : `<button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button>`}</div>`).join('') + '<button class="mt btn" data-act="addType">Add a type</button>');
     h += card('Monthly bills and fixed costs', S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join(''));
     h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
@@ -969,13 +996,14 @@
   }
   const wizForm = () => { const f = $('#sheet form[data-form=wiz]'); if (f) wizSave(ui.wiz, new FormData(f)); };
 
-  function addSheet(id) {
+  function addSheet(id, preCat) {
     const e = id ? S.expenses.find((x) => x.id === id) : null;
-    const cat = e ? e.cat : ui.lastCat, acct = e ? e.account : S.lastAccount;
+    const cat = e ? e.cat : preCat || (isFlex(ui.lastCat) ? ui.lastCat : 'food'), acct = e ? e.account : S.lastAccount;
     ui.rcpt = null; ui.rcptDel = false; ui.rcptFor = e ? e.id : null;
     openSheet(`<h2>${e ? 'Edit expense' : 'Add expense'}</h2><form data-form="expense"><input type="hidden" name="id" value="${id || ''}">
       <input class="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${e ? e.amount.toFixed(2) : ''}" required>
-      <label class="f">Category</label><div class="chips">${S.cats.map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
+      <label class="f">Spending money</label><div class="chips">${S.cats.filter((c) => c.kind === 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
+      <label class="f">Bills and gas</label><div class="chips">${S.cats.filter((c) => c.kind !== 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional" value="${esc(e ? e.note : '')}">
       <label class="f">Receipt photo</label><div id="rcptbox">${rcptBoxHTML()}</div><input type="file" id="rcptfile" accept="image/*" hidden>
       <label class="f">Card or account</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === acct ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash" ${acct === 'cash' ? 'selected' : ''}>Cash or other</option></select>
@@ -987,6 +1015,7 @@
       <div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>
       ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
     const a = $('#sheet input[name=amount]'); if (a && !e) setTimeout(() => a.focus(), 50);
+    if (preCat === 'gas' && !e) { const h2 = $('#sheet h2'); if (h2) h2.textContent = 'Log a fill up'; }
   }
 
   // ---------- forms ----------
@@ -1158,6 +1187,15 @@
     mode(d) { S.mode = d.m; save(); render(); },
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
+    logGas() { addSheet(null, 'gas'); },
+    addType() { S.cats.splice(S.cats.findIndex((c) => c.id === 'other'), 0, { id: uid(), name: 'New type', kind: 'flex' }); save(); render(); },
+    delType(d) {
+      const n = S.expenses.filter((e) => e.cat === d.id).length, c = S.cats.find((x) => x.id === d.id); if (!c) return;
+      if (!confirm(n ? 'Remove ' + c.name + '? Its ' + n + ' purchase' + (n === 1 ? '' : 's') + ' will move to Other.' : 'Remove ' + c.name + '?')) return;
+      S.expenses.forEach((e) => { if (e.cat === d.id) e.cat = 'other'; });
+      S.rules.forEach((r) => { if (r.cat === d.id) r.cat = 'other'; });
+      S.cats = S.cats.filter((x) => x !== c); save(); render();
+    },
     weekDetail() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = 0; render(); window.scrollTo(0, 0); },
     editExp(d) { addSheet(d.id); },
     delExp(d) {
@@ -1471,6 +1509,7 @@
     applyBudgetNov2026();
     removeDadPayment();
     poolSpending();
+    addSpendTypes();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
@@ -1500,6 +1539,15 @@
     if (S.persona !== 'blank') { const f = S.cats.find((c) => c.id === 'food'); if (f && f.name === 'Food and fun') f.name = 'Food'; }
     S.poolSpend = true; save();
     setTimeout(() => toast('$60 a week now covers all your spending'), 800);
+  }
+  // One time: add types for weekly spending money so purchases can be split by what they were.
+  function addSpendTypes() {
+    if (S.spendTypes) return;
+    const at = S.cats.findIndex((c) => c.id === 'amazon'), add = [];
+    if (!S.cats.some((c) => c.id === 'fun')) add.push({ id: 'fun', name: 'Fun and going out', kind: 'flex' });
+    if (!S.cats.some((c) => c.id === 'shop')) add.push({ id: 'shop', name: 'Shopping', kind: 'flex' });
+    S.cats.splice(at < 0 ? S.cats.length : at, 0, ...add);
+    S.spendTypes = true; save();
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
