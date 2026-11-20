@@ -1,4 +1,4 @@
-const CACHE = 'money-v3';
+const CACHE = 'money-v4';
 const ASSETS = ['./', 'index.html', 'styles.css', 'core.js', 'vault.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -21,11 +21,11 @@ self.addEventListener('fetch', (e) => {
   if (!sameOrigin && !pinnedCdn) return;
   e.respondWith(
     caches.match(req).then((hit) => {
-      const net = fetch(req).then((res) => {
+      const net = fetch(req, sameOrigin ? { cache: 'no-cache' } : undefined).then((res) => {
         if (res && (res.ok || res.type === 'opaque')) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
       }).catch(() => hit || (req.mode === 'navigate' ? caches.match('index.html') : undefined));
-      return hit || net;
+      return sameOrigin ? net : (hit || net);
     })
   );
 });

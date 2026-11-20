@@ -455,6 +455,7 @@
   function SecurityView() {
     return back() + `<h1 class="title">Security and backup</h1><div class="sub">Your data never leaves this device</div>` +
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
+      card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
       card('Lock', `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change passcode</button></div><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage. ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
@@ -914,6 +915,16 @@
     const cs = document.querySelector('meta[name=color-scheme]'); if (cs) cs.setAttribute('content', t === 'auto' ? 'dark light' : light ? 'light' : 'dark');
     const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', BARS[t] || (matchMedia('(prefers-color-scheme: light)').matches ? '#eef2fa' : '#0a1120'));
   }
+  actions.updateApp = async () => {
+    toast('Updating');
+    try {
+      await flush();
+      const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
+      await Promise.all(regs.map((r) => r.unregister()));
+      const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (e) {}
+    location.reload();
+  };
   actions.setTheme = (d) => { try { localStorage.setItem('moneytheme', d.v); } catch (e) {} applyTheme(d.v); render(); };
   applyTheme(getTheme());
   applyScale(getScale());
