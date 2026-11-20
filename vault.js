@@ -39,6 +39,18 @@
     return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').clear(); t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
   };
 
+  const kvDel = async (k) => {
+    if (useMem()) { mem = mem || new Map(); mem.delete(k); return; }
+    const d = await db();
+    return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+  };
+  const kvKeys = async () => {
+    if (useMem()) { mem = mem || new Map(); return [...mem.keys()]; }
+    const d = await db();
+    return new Promise((res, rej) => { const r = d.transaction('kv').objectStore('kv').getAllKeys(); r.onsuccess = () => res(r.result.map(String)); r.onerror = () => rej(r.error); });
+  };
+  const fileKeys = async () => (await kvKeys()).filter((k) => k.startsWith('f:'));
+
   const deriveBits = async (pass, salt, iter) => {
     const km = await subtle().importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits']);
     return new Uint8Array(await subtle().deriveBits({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, km, 256));
@@ -54,6 +66,13 @@
   let key = null;
   let auto = false;
   const AUTO_ITER = 1000;
+  // Receipt photos are sealed with the vault key, so they must be sealed again when the key changes.
+  const rewrap = async (oldK, newK) => {
+    if (!oldK || oldK === newK) return;
+    for (const k of await fileKeys()) {
+      try { await kvPut(k, await seal(newK, await open(oldK, await kvGet(k)))); } catch (e) { /* unreadable file, leave it */ }
+    }
+  };
 
   const Vault = {
     ITER,
@@ -68,6 +87,7 @@
       const secret = toB64(rand(32)), salt = rand(16);
       const k = await toKey(await deriveBits(secret, salt, AUTO_ITER));
       await kvPut('meta', { salt: toB64(salt), iter: AUTO_ITER, check: await seal(k, { ok: 1 }), face: null, auto: secret });
+      await rewrap(key, k);
       key = k; auto = true;
       await Vault.save(state);
     },
@@ -91,6 +111,7 @@
       const salt = rand(16);
       const k = await toKey(await deriveBits(newPass, salt, ITER));
       await kvPut('meta', { salt: toB64(salt), iter: ITER, check: await seal(k, { ok: 1 }), face: null });
+      await rewrap(key, k);
       key = k; auto = false;
       await Vault.save(state);
     },
@@ -126,14 +147,22 @@
       const salt = rand(16);
       const k = await toKey(await deriveBits(newPass, salt, ITER));
       await kvPut('meta', { salt: toB64(salt), iter: ITER, check: await seal(k, { ok: 1 }), face: null });
+      await rewrap(key, k);
       key = k; auto = false;
       await Vault.save(state);
     },
 
     exportBackup: async () => {
       const meta = await kvGet('meta'); const blob = await kvGet('blob');
-      return JSON.stringify({ app: 'money', v: 1, meta: { salt: meta.salt, iter: meta.iter, check: meta.check, auto: meta.auto }, blob });
+      const files = {};
+      for (const k of await fileKeys()) files[k.slice(2)] = await kvGet(k);
+      return JSON.stringify({ app: 'money', v: 1, meta: { salt: meta.salt, iter: meta.iter, check: meta.check, auto: meta.auto }, blob, files });
     },
+
+    // Encrypted extra files such as receipt photos, stored apart from the main data.
+    putFile: async (id, data) => { if (!key) throw new Error('Locked'); await kvPut('f:' + id, await seal(key, data)); },
+    getFile: async (id) => { if (!key) throw new Error('Locked'); const b = await kvGet('f:' + id); return b ? open(key, b) : null; },
+    delFile: async (id) => { await kvDel('f:' + id); },
 
     importBackup: async (text, pass) => {
       const data = JSON.parse(text);
@@ -144,6 +173,8 @@
       const state = await open(k, data.blob);
       await kvPut('meta', { salt: data.meta.salt, iter: data.meta.iter, check: data.meta.check, face: null, auto: data.meta.auto });
       await kvPut('blob', data.blob);
+      for (const old of await fileKeys()) await kvDel(old);
+      if (data.files) for (const id of Object.keys(data.files)) await kvPut('f:' + id, data.files[id]);
       key = k; auto = !!data.meta.auto;
       return state;
     },

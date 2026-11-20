@@ -78,7 +78,8 @@
         { match: 'amazon', cat: 'amazon' }, { match: 'amzn', cat: 'amazon' },
         { match: 'shell', cat: 'gas' }, { match: 'costco gas', cat: 'gas' }
       ],
-      paySource: 'checking', csvMap: null, lastBackup: null, lastAccount: 'chk', dismissed: {}
+      paySource: 'checking', csvMap: null, lastBackup: null, lastAccount: 'chk', dismissed: {},
+      autoBal: true, balSince: null, rollover: false, rollSince: null, payFreq: 'biweekly', paychecks: [], transfers: [], setupV: 0
     };
   }
 
@@ -177,6 +178,44 @@
   const payPool = () => sum(S.accounts.filter((a) => a.type === payType()), (a) => a.balance);
   const payName = () => (payType() === 'savings' ? 'Savings' : 'Checking');
 
+  // Balances follow purchases logged on or after the day automatic balances started.
+  function applyBal(e) {
+    if (!S.autoBal || e.bal || !S.balSince || e.date < S.balSince) return;
+    const a = S.accounts.find((x) => x.id === e.account); if (!a) return;
+    const d = a.type === 'card' ? e.amount : -e.amount;
+    a.balance = C.round2((a.balance || 0) + d); e.bal = { id: a.id, d };
+  }
+  function revertBal(e) {
+    if (!e.bal) return;
+    const a = S.accounts.find((x) => x.id === e.bal.id); if (a) a.balance = C.round2((a.balance || 0) - e.bal.d);
+    delete e.bal;
+  }
+  const PER_MONTH = { weekly: 52 / 12, biweekly: 26 / 12, semimonthly: 2, monthly: 1 };
+  const DAYS_PER = { weekly: 7, biweekly: 14, semimonthly: 15, monthly: 30 };
+  const FREQS = [['weekly', 'Every week'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Once a month']];
+  const payFreq = () => (S.mode === 'summer' ? S.budget.summer.freq : S.payFreq) || 'biweekly';
+  const perCheck = () => (S.mode === 'summer' ? S.budget.summer.pay || 0 : C.round2(incomeOf('school') / PER_MONTH[payFreq()]));
+  // Weekly food and fun limit, plus anything left over from earlier weeks when rollover is on.
+  function weekLimit(ws) {
+    const base = budgetOf().foodWeek || 0;
+    if (!S.rollover || !S.rollSince || !base) return base;
+    let w = C.weekStart(S.rollSince); const early = C.addDays(ws, -84); if (w < early) w = early;
+    let carry = 0;
+    for (; w < ws; w = C.addDays(w, 7)) carry = Math.min(base, Math.max(0, base + carry - weekSpend(w)));
+    return base + carry;
+  }
+  const SUB_DAYS = 90;
+  const subsDue = () => S.bills.filter((b) => b.cat === 'subs' && (!b.reviewed || C.daysBetween(b.reviewed, C.today()) >= SUB_DAYS));
+  function lastPaid(b) { const l = S.expenses.filter((e) => e.billId === b.id).map((e) => e.date).sort(); return l[l.length - 1] || null; }
+  function setupGaps() {
+    const g = [], nd = S.bills.filter((b) => !b.day).length;
+    if (!incomeOf(S.mode)) g.push(['Add your income', 'budgetEdit']);
+    if (nd) g.push([nd + ' bill' + (nd === 1 ? ' has' : 's have') + ' no due day', 'bills']);
+    if (!budgetOf().foodWeek) g.push(['Set a weekly food and fun limit', 'budgetEdit']);
+    if (!S.accounts.some((a) => a.balance)) g.push(['Enter your account balances', 'cards']);
+    return g;
+  }
+
   // ---------- small UI parts ----------
   const bar = (pct, cls) => `<div class="bar"><div class="fill ${cls}" data-w="${Math.max(0, Math.min(100, pct * 100)).toFixed(1)}"></div></div>`;
   function ring(pct, cls, big, small) {
@@ -217,6 +256,12 @@
       const open = S.ious.filter((i) => !i.settled).length;
       h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
     }
+    if (S.setupDone && (S.setupV || 0) < 2 && !S.dismissed.v2) {
+      h += card('Finish setting up', `<p class="med">New setup steps were added</p><p class="muted">Pay schedule, each credit card, bill due dates, and savings goals. It takes about 3 minutes and fills in everything the app uses.</p><div class="btns"><button class="btn" data-act="dismissV2">Not now</button><button class="btn primary" data-act="quickSetup">Finish setup</button></div>`, 'note');
+    } else if (S.setupV >= 2 && !S.dismissed['gap' + C.monthKey(t)]) {
+      const gaps = setupGaps();
+      if (gaps.length) h += card('Still missing', gaps.map((x) => `<button class="mrow" data-act="openMore" data-v="${x[1]}"><span>${x[0]}</span><span class="chev">&rsaquo;</span></button>`).join('') + '<button class="mt btn small" data-act="dismissGaps">Hide for this month</button>');
+    }
     const lb = S.lastBackup;
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
       h += card('Back up your data', `<p class="med">${lb ? 'It has been ' + C.daysBetween(lb, t) + ' days since your last backup.' : 'You have not backed up yet.'}</p><p class="muted small">Your data only lives on this phone. If Safari clears it or you lose the phone, a backup is the only way to get it back. Save the file to iCloud Drive.</p><div class="btns"><button class="btn" data-act="dismissBackup">Tomorrow</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`, lb ? '' : 'warn');
@@ -225,8 +270,8 @@
       h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>${payName()} has ${fm(payPool())}. You are short ${fm(cardsOwed() - payPool())} before you pay them off.</p>`, 'warn');
     }
 
-    const ws = C.weekStart(t), fw = b.foodWeek, sp = weekSpend(ws), left = fw - sp;
-    h += card('Left to spend this week', `<p class="big ${left < 0 ? 'r' : 'g'}">${fm(left)} ${left < 0 ? 'over' : 'left'}</p><p class="muted">${fm(sp)} of ${fm(fw)} on food and fun. ${daysToSunday()} days until Sunday.</p>${bar(fw ? sp / fw : 0, C.status(fw ? sp / fw : 0))}`);
+    const ws = C.weekStart(t), fw = weekLimit(ws), sp = weekSpend(ws), left = fw - sp;
+    h += card('Left to spend this week', `<p class="big ${left < 0 ? 'r' : 'g'}">${fm(left)} ${left < 0 ? 'over' : 'left'}</p><p class="muted">${fm(sp)} of ${fm(fw)} on food and fun. ${daysToSunday()} days until Sunday.${fw > b.foodWeek ? ' Includes ' + fm(fw - b.foodWeek) + ' rolled over.' : ''}</p>${bar(fw ? sp / fw : 0, C.status(fw ? sp / fw : 0))}`);
 
     const ms = monthSpend(mk), spent = sum(Object.values(ms)), plan = plannedSpend();
     const over = S.cats.filter((c) => (b.amounts[c.id] || 0) > 0 && (ms[c.id] || 0) > b.amounts[c.id]).length;
@@ -242,10 +287,12 @@
     const nb = nextBill();
     h += card('Next bill due', nb ? `<p class="med ${nb.overdue ? 'r' : ''}">${esc(nb.b.name)}, ${fm(nb.b.amount)}</p><p class="muted">${nb.overdue ? 'Overdue since ' : 'Due '}${C.shortDate(nb.date)}</p>` : '<p class="muted">Set due days in Recurring bills to see this.</p><button class="mt btn" data-act="openMore" data-v="bills">Recurring bills</button>');
 
+    const sd = subsDue();
+    if (sd.length && !S.dismissed['subs' + mk]) h += card('Subscription check', `<p class="med">${sd.length} subscription${sd.length === 1 ? '' : 's'} to review</p><p class="muted">${esc(sd.slice(0, 3).map((b) => b.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?</p><div class="btns"><button class="btn" data-act="dismissSubs">Later</button><button class="btn primary" data-act="openMore" data-v="bills">Review</button></div>`);
     const st = takeoutStreak();
     h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food and fun purchase.' : 'No food and fun logged yet.'}</p>`);
 
-    h += `<div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
+    h += `<button class="mb14 btn primary" data-act="paycheck">I got paid</button><div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
     return h;
   }
 
@@ -258,11 +305,11 @@
   }
   function WeekView() {
     const ws = C.weekStart(C.addDays(C.today(), ui.wOff * 7)), we = C.addDays(ws, 6), b = budgetOf();
-    const sp = weekSpend(ws), fw = b.foodWeek, left = fw - sp, pct = fw ? sp / fw : 0;
+    const sp = weekSpend(ws), fw = weekLimit(ws), left = fw - sp, pct = fw ? sp / fw : 0;
     let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
     const sub = ui.wOff === 0 ? `${daysToSunday()} days until Sunday` : (left < 0 ? 'over' : 'left');
     h += card('Food and fun', ring(pct, C.status(pct), fm(left), left < 0 ? 'over budget' : 'left') +
-      `<p class="tc muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` +
+      `<p class="tc muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` + (fw > b.foodWeek ? `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>` : '') +
       (ui.wOff === 0 && left > 0 ? `<p class="tc muted small">About ${fm(left / daysToSunday())} a day to stay on track.</p>` : ''));
     const list = S.expenses.filter((e) => counted(e) && e.cat === 'food' && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
     h += card('Food and fun this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
@@ -283,15 +330,27 @@
     return h;
   }
   function expRow(e) {
-    const tags = (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '');
+    const tags = (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
     return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span><b>${fm(e.amount)}</b></div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
   }
+  function histMatches() {
+    const q = (ui.hq || '').trim().toLowerCase(), cat = ui.hcat || '', rng = ui.hrng || 'all', t = C.today();
+    const since = rng === 'm' ? C.monthKey(t) + '-01' : rng === '30' ? C.addDays(t, -29) : rng === '90' ? C.addDays(t, -89) : '';
+    const isAmt = /^\$?\d+(\.\d{1,2})?$/.test(q), qn = C.num(q);
+    return S.expenses.filter((e) => (!cat || e.cat === cat) && (!since || e.date >= since) && (!q ||
+      (e.note || '').toLowerCase().includes(q) || catName(e.cat).toLowerCase().includes(q) || (e.forOther || '').toLowerCase().includes(q) ||
+      (isAmt && Math.abs(e.amount - qn) < 0.005))).sort((a, c) => (a.date < c.date ? 1 : a.date > c.date ? -1 : 0));
+  }
+  function histListHTML() {
+    const list = histMatches(), filtered = ui.hq || ui.hcat || (ui.hrng && ui.hrng !== 'all');
+    if (!list.length) return '<p class="muted">Nothing matches.</p>';
+    return (filtered ? `<p class="muted small">${list.length} found, ${fm(sum(list, (e) => e.amount))} total</p>` : '') + list.slice(0, ui.hist).map(expRow).join('') +
+      (list.length > ui.hist ? '<button class="mt btn" data-act="moreHist">Show more</button>' : '');
+  }
   function HistView() {
-    const list = S.expenses.slice().sort((a, c) => (a.date < c.date ? 1 : a.date > c.date ? -1 : 0));
-    if (!list.length) return card('History', '<p class="muted">No expenses yet. Tap Add to log your first one.</p>');
-    let h = card('History', list.slice(0, ui.hist).map(expRow).join(''));
-    if (list.length > ui.hist) h += `<button class="btn" data-act="moreHist">Show more</button>`;
-    return h;
+    if (!S.expenses.length) return card('History', '<p class="muted">No expenses yet. Tap Add to log your first one.</p>');
+    return card('Search', `<input type="search" id="hq" placeholder="Name, category, or amount" autocomplete="off" value="${esc(ui.hq || '')}"><div class="two mt8"><select id="hcat"><option value="">All categories</option>${S.cats.map((c) => `<option value="${c.id}" ${ui.hcat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><select id="hrng">${[['all', 'All time'], ['m', 'This month'], ['30', 'Last 30 days'], ['90', 'Last 90 days']].map((o) => `<option value="${o[0]}" ${(ui.hrng || 'all') === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>`) +
+      card('History', `<div id="histlist">${histListHTML()}</div>`);
   }
 
   // ---------- IOUs ----------
@@ -359,7 +418,7 @@
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
     const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
-    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="quickSetup">Run quick setup again</button>');
+    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="paycheck">I got paid: plan this paycheck</button><button class="mt btn" data-act="quickSetup">Run setup again</button>');
   }
 
   function BillsView() {
@@ -369,7 +428,15 @@
       const paid = billPaid(b, mk), due = b.day ? dueDate(mk, b.day) : null, late = !paid && due && due < t;
       return `<div class="item row"><label class="f1 check"><input type="checkbox" data-act="billPaid" data-id="${b.id}" ${paid ? 'checked' : ''}><span><span class="t ${late ? 'r' : ''}">${esc(b.name)}</span><br><span class="muted small">${fm(b.amount)}, ${due ? 'due ' + C.shortDate(due) : 'no due day set'}</span></span></label><button class="btn small" data-act="editBill" data-id="${b.id}">Edit</button></div>`;
     }).join('') || '<p class="muted">No bills yet.</p>');
-    h += `<button class="btn primary" data-act="addBill">Add a bill</button>`;
+    h += `<button class="mb16 btn primary" data-act="addBill">Add a bill</button>`;
+    const mon = sum(S.bills, (b) => b.amount), subs = S.bills.filter((b) => b.cat === 'subs');
+    if (S.bills.length) h += card('Yearly cost', `<p class="big">${fm(mon * 12)} <span class="muted med">a year</span></p><p class="muted">${fm(mon)} a month across ${S.bills.length} bill${S.bills.length === 1 ? '' : 's'}.${subs.length ? ' Subscriptions alone cost ' + fm(sum(subs, (b) => b.amount) * 12) + ' a year.' : ''}</p>`);
+    if (subs.length) h += card('Subscription check', subs.map((b) => {
+      const due = !b.reviewed || C.daysBetween(b.reviewed, t) >= SUB_DAYS, lp = lastPaid(b);
+      return `<div class="item"><div class="row"><span class="t">${esc(b.name)}</span><b>${fm(b.amount * 12)}<span class="muted small"> a year</span></b></div><div class="muted small">${lp ? 'Last marked paid ' + C.shortDate(lp) : 'Never marked paid'}${b.reviewed ? '. Checked ' + C.shortDate(b.reviewed) : ''}</div>${due ? `<p class="mt8 med">Still using it?</p><div class="btns"><button class="btn small" data-act="subKeep" data-id="${b.id}">Keep it</button><button class="btn small danger" data-act="subCancel" data-id="${b.id}">I cancelled it</button></div>` : ''}</div>`;
+    }).join('') + '<p class="muted small mt8">Each one asks again every 3 months, so nothing renews without you noticing.</p>');
+    const nd = S.bills.filter((b) => !b.day).length;
+    h += card('Reminders on your calendar', `<p class="muted">Adds each bill with a due day to your phone calendar as a monthly event, with an alert at 9 AM the day before. It also adds a weekly Sunday check in${S.goals.ins.due ? ' and your insurance due date' : ''}.</p>${nd ? `<p class="small y">${nd} bill${nd === 1 ? ' has' : 's have'} no due day and will be left out. Tap Edit to add one.</p>` : ''}<div class="btns"><button class="btn primary" data-act="icsOpen">Add to Calendar</button><button class="btn" data-act="icsShare">Share file</button></div><p class="muted small mt8">If you change a due day later, add them again and delete the old events.</p>`);
     return h;
   }
 
@@ -393,7 +460,10 @@
     if (owed > chk && owed > 0) h += card('Warning', `<p class="med r">Cards owe ${fm(owed)}</p><p>${payName()} has ${fm(chk)}. You are short ${fm(owed - chk)} before you pay them off.</p>`, 'warn');
     else if (owed > 0) h += card('Payoff check', `<p class="med g">${payName()} covers your cards</p><p class="muted">${fm(chk - owed)} to spare after ${fm(owed)} in card balances.</p>`);
     h += card('Pay cards off from', `<select data-path="paySource" data-re="1"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select>`);
-    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : a.type === 'savings' ? 'Savings' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input class="mt8" type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}"></div>`).join(''));
+    h += card('Automatic balances', `<label class="check"><input type="checkbox" data-act="toggleAutoBal" ${S.autoBal ? 'checked' : ''}>Update balances when I log purchases</label><p class="muted small">A purchase on a card adds to what it owes. A purchase on checking or savings takes it out.${S.autoBal && S.balSince ? ' Counting purchases dated ' + C.shortDate(S.balSince) + ' or later.' : ''} Compare with your bank now and then and fix any balance below.</p>`);
+    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : a.type === 'savings' ? 'Savings' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input class="mt8" type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}">${a.type === 'card' && a.balance > 0 ? `<button class="mt8 btn small" data-act="payCard" data-id="${a.id}">I paid this card</button>` : ''}</div>`).join(''));
+    const tr = (S.transfers || []).slice(-3).reverse();
+    if (tr.length) h += card('Recent card payments', tr.map((x) => { const to = S.accounts.find((a) => a.id === x.to), fr = S.accounts.find((a) => a.id === x.from); return `<div class="row item"><span>${C.shortDate(x.date)}, ${esc(to ? to.name : 'Card')} from ${esc(fr ? fr.name : 'account')}</span><b>${fm(x.amount)}</b></div>`; }).join(''));
     h += `<button class="btn primary" data-act="addAcct">Add a card or account</button>`;
     return h;
   }
@@ -409,9 +479,10 @@
     const m = S.mode, b = budgetOf();
     let h = back() + `<h1 class="title">Budget and income</h1><div class="sub">Editing ${m === 'school' ? 'School year' : 'Summer'} mode</div>`;
     h += `<div class="seg"><button class="${m === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${m === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
-    if (m === 'school') h += card('Income', `<label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" data-path="budget.school.income" data-t="n" data-re="1" value="${b.income}"><p class="muted small">Bonus money like tips is logged separately and never counted as income.</p>`);
+    if (m === 'school') h += card('Income', `<label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" data-path="budget.school.income" data-t="n" data-re="1" value="${b.income}"><label class="f">How often you get paid</label><select data-path="payFreq" data-t="s" data-re="1">${FREQS.map((o) => `<option value="${o[0]}" ${S.payFreq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted small">Bonus money like tips is logged separately and never counted as income.</p>`);
     else h += card(mahi() ? 'Toyota co op pay' : 'Summer job pay', `<label class="f">Pay per check</label><input type="text" inputmode="decimal" data-path="budget.summer.pay" data-t="n" data-re="1" value="${b.pay || ''}"><label class="f">How often</label><select data-path="budget.summer.freq" data-t="s" data-re="1">${[['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Monthly']].map((o) => `<option value="${o[0]}" ${b.freq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted">About ${fm(incomeOf('summer'))} a month.</p>`);
     h += card('Monthly spending budget', S.cats.filter((c) => c.id !== 'other').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id]}">`).join('') + `<label class="f">Food and fun per week</label><input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}">`);
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent food and fun into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
     h += card('Monthly savings targets', Object.keys(b.savings).map((k) => `<label class="f">${labels[k] || k}</label><input type="text" inputmode="decimal" data-path="budget.${m}.savings.${k}" data-t="n" data-re="1" value="${b.savings[k]}">`).join(''));
     const inc = incomeOf(m), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv);
@@ -427,7 +498,7 @@
     const t = C.today(), mk = C.monthKey(t), b = budgetOf(), ms = monthSpend(mk), ws = C.weekStart(t);
     const line = (label, left, after) => `<div class="item"><div class="t">${label}</div><div class="row"><span class="muted">Now</span><span>${fm(left)} ${left < 0 ? 'over' : 'left'}</span></div><div class="row"><span class="muted">After</span><b class="${after < 0 ? 'r' : after < price ? 'y' : 'g'}">${fm(after)} ${after < 0 ? 'over' : 'left'}</b></div></div>`;
     let out = '';
-    if (cat === 'food') { const l = b.foodWeek - weekSpend(ws); out += line('This week, food and fun', l, l - price); }
+    if (cat === 'food') { const l = weekLimit(ws) - weekSpend(ws); out += line('This week, food and fun', l, l - price); }
     const cl = (b.amounts[cat] || 0) - (ms[cat] || 0);
     out += line('This month, ' + esc(catName(cat)), cl, cl - price);
     const tl = plannedSpend() - sum(Object.values(ms));
@@ -441,7 +512,8 @@
     let h = back() + `<h1 class="title">Reports</h1><div class="sub">Everything you logged, by ${unit}</div>`;
     h += `<div class="seg"><button class="${isW ? 'on' : ''}" data-act="rper" data-v="week">Weekly</button><button class="${isW ? '' : 'on'}" data-act="rper" data-v="month">Monthly</button></div>`;
     h += `<div class="mb14 row"><button class="btn small" data-act="rnav" data-d="-1">Previous</button><div class="m0 med tc f1 navt">${esc(r.title)}</div><button class="btn small" data-act="rnav" data-d="1" ${r.future ? 'disabled' : ''}>Next</button></div>`;
-    if (!r.all.length) return h + card('', `<p class="muted">Nothing was logged this ${unit}.</p>`);
+    const trend = card(isW ? 'Last 8 weeks' : 'Last 6 months', trendHTML(r));
+    if (!r.all.length) return h + card('', `<p class="muted">Nothing was logged this ${unit}.</p>`) + trend;
 
     const diff = r.tot - r.prevTot, pct = r.prevTot ? Math.round(Math.abs(diff) / r.prevTot * 100) : 0;
     const cmp = !r.prevTot ? `Nothing was logged the ${unit} before.` : Math.abs(diff) < 0.005 ? `Same as last ${unit}.` : `${fm(diff)} ${diff > 0 ? 'more' : 'less'} than last ${unit} (${pct}%).`;
@@ -449,8 +521,9 @@
       `<div class="row item"><span>Purchases</span><b>${r.list.length}</b></div><div class="row item"><span>Average per day</span><b>${fm(r.tot / r.days)}</b></div>` +
       (r.big ? `<div class="row item"><span>Biggest: ${esc(r.big.note || catName(r.big.cat))}</span><b>${fm(r.big.amount)}</b></div>` : ''));
 
+    h += trend;
     if (isW) {
-      const fw = budgetOf().foodWeek, fs = r.byCat.food || 0;
+      const fw = weekLimit(r.from), fs = r.byCat.food || 0;
       if (fw) h += card('Food and fun', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fs / fw, C.status(fs / fw))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
     }
 
@@ -471,7 +544,7 @@
     const ex = [['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
     if (ex.length) h += card('Not counted in your budget', ex.map((x) => `<div class="row item"><span>${x[0]}</span><b>${fm(x[1])}</b></div>`).join(''));
 
-    const sv = [['Saved toward goals', r.saved], ['IOU payments back to you', r.iouIn]].filter((x) => x[1] > 0);
+    const sv = [['Paychecks', r.paid], ['Saved toward goals', r.saved], ['IOU payments back to you', r.iouIn]].filter((x) => x[1] > 0);
     if (sv.length || !isW) h += card('Money in', (sv.map((x) => `<div class="row item"><span>${x[0]}</span><b class="g">${fm(x[1])}</b></div>`).join('') || '<p class="muted">No savings or IOU payments logged.</p>') + (!isW && plannedSavings() ? `<p class="muted small mt8">Savings plan this month: ${fm(plannedSavings())}. ${r.saved >= plannedSavings() ? 'You hit it.' : fm(plannedSavings() - r.saved) + ' short.'}</p>` : ''));
 
     h += card('Everything logged', `<details class="rlist"><summary>Show all ${r.all.length} entries</summary>${r.all.slice().sort((a, c) => (c.date + c.id).localeCompare(a.date + a.id)).map((e) => `<div class="row item"><span>${C.shortDate(e.date)} · ${esc(e.note || catName(e.cat))}${counted(e) ? '' : ' <span class="muted small">not counted</span>'}</span><b>${fm(e.amount)}</b></div>`).join('')}</details>`);
@@ -514,14 +587,101 @@
     const saved = sum(Object.values(S.goals), (g) => sum(g.contribs.filter((c) => inR(c.date)), (c) => c.amount));
     const iouIn = sum(S.ious.filter((i) => i.dir === 'owedToMe'), (i) => sum((i.payments || []).filter((p) => p.date && inR(p.date)), (p) => p.amount));
     const s = (f) => C.round2(sum(all.filter(f), (e) => e.amount));
+    const paid = sum((S.paychecks || []).filter((x) => inR(x.date)), (x) => x.amount);
     return {
-      per, from, to, title, all, list, tot, prevTot, byCat, byAcct, buckets, days, saved, iouIn,
+      per, from, to, title, all, list, tot, prevTot, byCat, byAcct, buckets, days, saved, iouIn, paid,
       future: to >= t,
       plan: per === 'week' ? 0 : plannedSpend(),
       big: list.slice().sort((a, c) => c.amount - a.amount)[0],
       top: Object.values(groups).sort((a, c) => c.v - a.v).slice(0, 5),
       fromSav: s((e) => e.paidFromSavings && !e.household), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
     };
+  }
+  function trendHTML(r) {
+    const isW = r.per === 'week', cat = ui.rtc || '', pts = [];
+    for (let i = isW ? 7 : 5; i >= 0; i--) {
+      let a, b, n;
+      if (isW) { a = C.addDays(r.from, -7 * i); b = C.addDays(a, 6); n = C.parse(a).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }); }
+      else { const mk = C.shiftMonthKey(C.monthKey(r.from), -i); a = mk + '-01'; b = mk + '-' + pad(dim(mk)); n = C.parse(a).toLocaleDateString('en-US', { month: 'short' }); }
+      pts.push({ n, v: sum(S.expenses.filter((e) => counted(e) && (!cat || e.cat === cat) && e.date >= a && e.date <= b), (e) => e.amount) });
+    }
+    const bo = budgetOf();
+    const plan = cat ? (isW ? (cat === 'food' ? bo.foodWeek : 0) : bo.amounts[cat] || 0) : (isW ? 0 : plannedSpend());
+    const W = 320, H = 160, top = 18, bot = 22, mx = Math.max(plan, ...pts.map((p) => p.v), 1), bw = W / pts.length;
+    const y = (v) => top + (H - top - bot) * (1 - v / mx);
+    let svg = `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending trend">`;
+    pts.forEach((p, i) => {
+      const cx = i * bw + bw / 2, yy = y(p.v);
+      svg += `<rect class="tb${i === pts.length - 1 ? ' cur' : ''}" x="${(i * bw + bw * 0.17).toFixed(1)}" y="${yy.toFixed(1)}" width="${(bw * 0.66).toFixed(1)}" height="${Math.max(0, H - bot - yy).toFixed(1)}" rx="4"/><text class="tl" x="${cx.toFixed(1)}" y="${H - 6}">${esc(p.n)}</text>`;
+      if (p.v) svg += `<text class="tv" x="${cx.toFixed(1)}" y="${(yy - 5).toFixed(1)}">${Math.round(p.v)}</text>`;
+    });
+    if (plan) svg += `<line class="tp" x1="0" x2="${W}" y1="${y(plan).toFixed(1)}" y2="${y(plan).toFixed(1)}"/>`;
+    svg += '</svg>';
+    const prev = pts.slice(0, -1), avg = sum(prev, (p) => p.v) / prev.length, cur = pts[pts.length - 1].v;
+    return `<select id="rtc"><option value="">All spending</option>${S.cats.map((c) => `<option value="${c.id}" ${c.id === cat ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>${svg}<p class="muted small">${plan ? 'The dashed line is your budget. ' : ''}Average of the ${prev.length} before this one: ${fm(avg)}.${avg && cur > avg * 1.15 ? ' This one is running higher.' : ''}</p>`;
+  }
+  function icsText() {
+    const t = C.today(), stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const d8 = (x) => x.replace(/-/g, ''), q = (x) => String(x).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Money app//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Money'];
+    const alarm = (trig, msg) => ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + q(msg), 'TRIGGER:' + trig, 'END:VALARM'];
+    S.bills.filter((b) => b.day).forEach((b) => {
+      const mk = C.monthKey(t); let first = dueDate(mk, b.day); if (first < t) first = dueDate(C.shiftMonthKey(mk, 1), b.day);
+      const days = []; for (let d = 28; d <= b.day; d++) days.push(d);
+      const rr = b.day > 28 ? 'RRULE:FREQ=MONTHLY;BYMONTHDAY=' + days.join(',') + ';BYSETPOS=-1' : 'RRULE:FREQ=MONTHLY;BYMONTHDAY=' + b.day;
+      L.push('BEGIN:VEVENT', 'UID:bill-' + b.id + '@money.app', 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + d8(first), 'DTEND;VALUE=DATE:' + d8(C.addDays(first, 1)), rr,
+        'SUMMARY:' + q(b.name + ' due: ' + fm(b.amount)), 'DESCRIPTION:' + q('Mark it paid in the Money app under Recurring bills.'), ...alarm('-PT15H', b.name + ' is due tomorrow: ' + fm(b.amount)), 'END:VEVENT');
+    });
+    const sun = C.addDays(C.weekStart(t), 7);
+    L.push('BEGIN:VEVENT', 'UID:weekly-checkin@money.app', 'DTSTAMP:' + stamp, 'DTSTART:' + d8(sun) + 'T180000', 'DURATION:PT15M', 'RRULE:FREQ=WEEKLY;BYDAY=SU',
+      'SUMMARY:Money: weekly check in', 'DESCRIPTION:' + q('Log anything you missed, read the weekly report, settle IOUs, and back up.'), ...alarm('PT0M', 'Weekly money check in'), 'END:VEVENT');
+    const ins = S.goals.ins;
+    if (ins.due && ins.due >= t) L.push('BEGIN:VEVENT', 'UID:ins-' + ins.due + '@money.app', 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + d8(ins.due), 'DTEND;VALUE=DATE:' + d8(C.addDays(ins.due, 1)),
+      'SUMMARY:' + q(ins.name + ' bill due'), ...alarm('-P6DT15H', ins.name + ' is due in a week'), 'END:VEVENT');
+    L.push('END:VCALENDAR');
+    return L.join('\r\n') + '\r\n';
+  }
+  function payPlan(amount, date) {
+    const f = PER_MONTH[payFreq()] || 1, share = 1 / f, b = budgetOf();
+    const fixed = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0) * share);
+    const flex = C.round2(sum(S.cats.filter((c) => c.kind === 'flex' && c.id !== 'food'), (c) => b.amounts[c.id] || 0) * share);
+    const weeks = Math.round((52 / 12 / f) * 10) / 10, food = C.round2((b.foodWeek || 0) * weeks);
+    const goals = Object.keys(b.savings).map((k) => ({ k, v: C.round2((b.savings[k] || 0) * share) })).filter((g) => g.v > 0);
+    const saving = sum(goals, (g) => g.v), left = C.round2(amount - fixed - flex - food - saving);
+    const next = C.addDays(date, DAYS_PER[payFreq()] || 14), dueSoon = [];
+    S.bills.filter((b2) => b2.day).forEach((b2) => {
+      [C.monthKey(date), C.shiftMonthKey(C.monthKey(date), 1)].forEach((mk) => {
+        const d = dueDate(mk, b2.day);
+        if (d >= date && d < next && !billPaid(b2, mk)) dueSoon.push({ b: b2, d });
+      });
+    });
+    return { fixed, flex, weeks, food, goals, saving, left, next, dueSoon };
+  }
+  function payPlanHTML(amount, date) {
+    if (!(amount > 0)) return '<p class="muted small">Enter the amount to see the plan.</p>';
+    const p = payPlan(amount, date), row = (n, v, cls) => `<div class="row item"><span>${n}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
+    let h = '<div class="card inset">' + row('Bills and fixed costs', p.fixed) + (p.flex ? row('Shopping and other', p.flex) : '') + row(`Food and fun, ${p.weeks} week${p.weeks === 1 ? '' : 's'}`, p.food) +
+      p.goals.map((g) => row('Save: ' + esc(S.goals[g.k] ? S.goals[g.k].name : g.k), g.v, 'g')).join('') +
+      row(p.left < 0 ? 'Short by' : 'Left over, free to use', p.left, p.left < 0 ? 'r' : 'g') + '</div>';
+    if (p.left < 0) h += '<p class="small r">This check does not cover the plan. Trim food and fun or move less to savings this time.</p>';
+    h += p.dueSoon.length ? `<p class="label mt">Due before your next check (${C.shortDate(p.next)})</p>` + p.dueSoon.sort((a, c) => (a.d < c.d ? -1 : 1)).map((x) => row(esc(x.b.name) + ', ' + C.shortDate(x.d), x.b.amount)).join('') : '<p class="muted small mt8">No bills with due days fall before your next check.</p>';
+    return h;
+  }
+  async function shrinkImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const k = Math.min(1, 1400 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.7);
+    } finally { URL.revokeObjectURL(url); }
+  }
+  function rcptBoxHTML() {
+    const e = ui.rcptFor ? S.expenses.find((x) => x.id === ui.rcptFor) : null;
+    if (ui.rcpt) return `<img class="thumb" src="${ui.rcpt}" alt="Receipt"><button type="button" class="mt8 btn small" data-act="rcptClear">Remove photo</button>`;
+    if (e && e.receipt && !ui.rcptDel) return `<div class="btns"><button type="button" class="btn small" data-act="rcptView">View receipt</button><button type="button" class="btn small danger" data-act="rcptClear">Remove</button></div>`;
+    return '<button type="button" class="btn small" data-act="rcptPick">Add a photo</button>';
   }
   function reportText(r) {
     const lines = [(r.per === 'week' ? 'Week of ' : '') + r.title, 'Spent: ' + fm(r.tot) + (r.plan ? ' of ' + fm(r.plan) : ''), 'Last ' + r.per + ': ' + fm(r.prevTot), ''];
@@ -652,22 +812,102 @@
     openSheet(`<h2>Quick setup</h2><p class="muted">Who is this app for?</p><div class="col"><button class="btn primary" data-act="setupMahi">I am Mahi</button><button class="btn" data-act="setupNew">Someone new, start blank</button><button class="btn" data-act="setupSkip">Skip for now</button></div><p class="muted small mt">Mahi gets the budget and bills that are already filled in. Someone new gets a clean slate and fills in their own numbers. This takes about a minute.</p>`);
   }
   const acctBal = (type) => { const a = S.accounts.find((x) => x.type === type); return a ? a.balance : 0; };
-  function setupForm() {
-    const b = S.budget.school, me = mahi();
-    const cats = me ? '' : '<p class="label mt">Monthly budget by category</p><p class="muted small">Leave at 0 for anything you do not spend on.</p>' + S.cats.filter((c) => c.id !== 'other').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" name="c_${c.id}" value="${b.amounts[c.id] || 0}">`).join('');
-    openSheet(`<h2>${me ? 'Check your numbers' : 'Your numbers'}</h2><p class="muted">${me ? 'Your budget and bills are already filled in. Confirm these, and skip any you do not know.' : 'Enter what you know. You can change everything later in More.'}</p><form data-form="quicksetup"><label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" name="inc" value="${b.income || ''}" placeholder="0"><label class="f">Checking balance right now</label><input type="text" inputmode="decimal" name="bal" value="${acctBal('checking') || ''}" placeholder="0"><label class="f">Savings balance right now</label><input type="text" inputmode="decimal" name="sav" value="${acctBal('savings') || ''}" placeholder="0"><label class="f">Credit card balance owed (all cards)</label><input type="text" inputmode="decimal" name="cc" value="${acctBal('card') || ''}" placeholder="0"><label class="f">I pay my cards off from</label><select name="src"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select><label class="f">Food and fun per week</label><input type="text" inputmode="decimal" name="fw" value="${b.foodWeek || ''}" placeholder="0">${cats}<div class="btns"><button class="btn" type="button" data-act="setupSkip">Skip</button><button class="btn primary" type="submit">Finish</button></div></form>`);
+  const setupForm = () => wizShow('pay');
+  const WIZ = ['pay', 'accounts', 'budget', 'bills', 'goals', 'done'];
+  const WIZT = { pay: 'Your pay', accounts: 'Accounts and cards', budget: 'Spending plan', bills: 'Recurring bills', goals: 'Savings goals', done: 'Almost done' };
+  const mIn = (name, val, ph) => `<input type="text" inputmode="decimal" name="${name}" value="${val ? val : ''}" placeholder="${ph || '0'}" autocomplete="off">`;
+  function wizShow(step) {
+    ui.wiz = step;
+    const i = WIZ.indexOf(step), me = mahi(), b = budgetOf();
+    let body = '';
+    if (step === 'pay') {
+      const f = payFreq();
+      body = `<p class="muted">Take home pay is what actually lands in your account after taxes.</p><label class="f">How often you get paid</label><select name="freq">${FREQS.map((o) => `<option value="${o[0]}" ${f === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><label class="f">Take home pay per paycheck</label>${mIn('per', perCheck())}<p class="muted small">If your pay changes, use a typical check. ${S.mode === 'school' ? 'A different summer job can be set later under Budget and income, Summer.' : ''}</p>`;
+    } else if (step === 'accounts') {
+      const cards = S.accounts.filter((a) => a.type === 'card');
+      body = `<p class="muted">Balances right now. Nicknames and last 4 digits only, never full numbers.</p><label class="f">Checking balance</label>${mIn('bal', acctBal('checking'))}<label class="f">Savings balance</label>${mIn('sav', acctBal('savings'))}` +
+        `<p class="label mt">Credit cards</p>` + (cards.length ? cards.map((a) => `<div class="card inset"><label class="f">Nickname</label><input type="text" name="cn_${a.id}" value="${esc(a.name)}" autocomplete="off"><div class="two"><div><label class="f">Last 4</label><input type="text" inputmode="numeric" maxlength="4" name="cl_${a.id}" value="${esc(a.last4 || '')}" autocomplete="off"></div><div><label class="f">Owed now</label>${mIn('cb_' + a.id, a.balance)}</div></div><button type="button" class="mt8 btn small danger" data-act="wizRmCard" data-id="${a.id}">Remove card</button></div>`).join('') : '<p class="muted small">No cards yet.</p>') +
+        `<button type="button" class="btn" data-act="wizAddCard">Add a credit card</button>` +
+        `<label class="f">I pay my cards off from</label><select name="src"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select>` +
+        `<label class="mt check"><input type="checkbox" name="auto" ${S.autoBal ? 'checked' : ''}>Update balances when I log purchases</label><p class="muted small">Recommended. A purchase on a card adds to what it owes, so the app can warn you before ${payType() === 'savings' ? 'savings' : 'checking'} runs short.</p>`;
+    } else if (step === 'budget') {
+      body = `<p class="muted">${me ? 'Your numbers are filled in. Fix anything that changed.' : 'Monthly amounts. Leave 0 for anything you do not spend on.'}</p><label class="f">Food and fun per week</label>${mIn('fw', b.foodWeek)}<label class="check"><input type="checkbox" name="roll" ${S.rollover ? 'checked' : ''}>Roll unspent food and fun into next week</label>` +
+        S.cats.filter((c) => c.id !== 'other' && c.id !== 'food').map((c) => `<label class="f">${esc(c.name)}, per month</label>${mIn('c_' + c.id, b.amounts[c.id])}`).join('') +
+        `<label class="f">Food and fun, per month</label>${mIn('c_food', b.amounts.food)}<p class="muted small">The weekly limit above is what the app tracks day to day.</p>`;
+    } else if (step === 'bills') {
+      body = `<p class="muted">Due days let the app warn you, plan each paycheck, and put bills on your calendar.</p>` + S.bills.map((x) => `<div class="card inset"><label class="f">Name</label><input type="text" name="bn_${x.id}" value="${esc(x.name)}" autocomplete="off"><div class="two"><div><label class="f">Amount</label>${mIn('ba_' + x.id, x.amount)}</div><div><label class="f">Due day</label><input type="number" min="1" max="31" name="bd_${x.id}" value="${x.day || ''}" placeholder="1 to 31"></div></div><label class="f">Category</label><select name="bc_${x.id}">${S.cats.map((c) => `<option value="${c.id}" ${x.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><button type="button" class="mt8 btn small danger" data-act="wizRmBill" data-id="${x.id}">Remove bill</button></div>`).join('') +
+        `<button type="button" class="btn" data-act="wizAddBill">Add a bill</button><p class="muted small mt8">Put streaming, apps, and memberships under Subscriptions so the app can check on them. If a category budget is lower than its bills, it gets raised to cover them.</p>`;
+    } else if (step === 'goals') {
+      const g = S.goals;
+      body = `<p class="muted">How much goes to each goal per month, plus any targets.</p>` + Object.keys(b.savings).map((k) => `<label class="f">${esc(g[k] ? g[k].name : k)}, per month</label>${mIn('sv_' + k, b.savings[k])}`).join('') +
+        `<label class="f">${esc(g.mom.name)}: total you still owe${me ? '' : ' someone, if any'}</label>${mIn('gt_mom', g.mom.target)}` +
+        `<label class="f">${esc(g.ins.name)}: amount of the bill</label>${mIn('gt_ins', g.ins.target)}<label class="f">${esc(g.ins.name)}: next due date</label><input type="date" name="gd_ins" value="${g.ins.due || ''}">` +
+        `<label class="f">${esc(g.trip.name)}: target</label>${mIn('gt_trip', g.trip.target)}`;
+    } else {
+      const inc = incomeOf(S.mode), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv), gaps = setupGaps();
+      body = `<div class="card inset"><div class="row"><span>Monthly income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending plan</span><b>${fm(sp)}</b></div><div class="row"><span>Savings plan</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Unassigned'}</span><b class="${left < 0 ? 'r' : 'g'}">${fm(left)}</b></div></div>` +
+        (left < 0 ? '<p class="small r">Your plan spends more than you make. Go Back and trim something.</p>' : '') +
+        (gaps.length ? '<p class="label mt">Still missing</p>' + gaps.map((x) => `<p class="small y">${x[0]}</p>`).join('') : '') +
+        `<p class="label mt">Last few things</p><div class="col"><button type="button" class="btn" data-act="exportBackup">Back up now${S.lastBackup ? ', last ' + C.shortDate(S.lastBackup) : ''}</button><button type="button" class="btn" data-act="icsOpen">Put bill reminders on my calendar</button>${V.isAuto() ? '<button type="button" class="btn" data-act="setPinNow">Set a PIN</button>' : ''}</div><p class="muted small mt8">Text size and themes are in Settings. Tap I got paid on Home every payday to plan the check.</p>`;
+    }
+    const nav = `<div class="btns">${i ? '<button class="btn" type="button" data-act="wizBack">Back</button>' : '<button class="btn" type="button" data-act="setupSkip">Later</button>'}<button class="btn primary" type="submit">${step === 'done' ? 'Finish' : 'Next'}</button></div>`;
+    openSheet(`<p class="label">Step ${i + 1} of ${WIZ.length}</p><h2>${WIZT[step]}</h2><form data-form="wiz">${body}${nav}</form>`);
+    const pn = $('#sheet .panel'); if (pn) pn.scrollTop = 0;
   }
-  function setupDone() {
-    openSheet(`<h2>You are set</h2><p class="med">Log purchases as you make them.</p><p class="muted">Your data only lives on this phone, so the app will remind you to back it up every week. Make your first backup now and save it to iCloud Drive.</p><div class="btns"><button class="btn" data-act="closeSheet">Later</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`);
+  function wizSave(step, fd) {
+    const b = budgetOf(), has = (k) => fd.get(k) !== null && String(fd.get(k)).trim() !== '';
+    if (step === 'pay') {
+      const f = fd.get('freq') || 'biweekly', per = C.num(fd.get('per'));
+      if (S.mode === 'summer') { S.budget.summer.freq = f; if (has('per')) S.budget.summer.pay = C.round2(per); }
+      else { S.payFreq = f; if (has('per')) S.budget.school.income = C.round2(per * PER_MONTH[f]); }
+    } else if (step === 'accounts') {
+      const put = (type, id, name, raw) => {
+        if (raw === null || String(raw).trim() === '') return;
+        const val = C.round2(C.num(raw)); const a = S.accounts.find((x) => x.type === type);
+        if (a) a.balance = val; else S.accounts.push({ id, name, last4: '', type, balance: val });
+      };
+      put('checking', 'chk', 'Checking', fd.get('bal')); put('savings', 'sav', 'Savings', fd.get('sav'));
+      S.accounts.filter((a) => a.type === 'card').forEach((a) => {
+        if (fd.get('cn_' + a.id) === null) return;
+        a.name = String(fd.get('cn_' + a.id)).trim() || a.name;
+        const l4 = String(fd.get('cl_' + a.id) || '').trim(); a.last4 = /^\d{4}$/.test(l4) ? l4 : '';
+        a.balance = C.round2(C.num(fd.get('cb_' + a.id)));
+      });
+      if (fd.get('src') !== null) S.paySource = fd.get('src') === 'savings' ? 'savings' : 'checking';
+      if (fd.get('src') !== null) { S.autoBal = !!fd.get('auto'); if (S.autoBal) S.balSince = C.today(); }
+    } else if (step === 'budget') {
+      if (fd.get('fw') === null) return;
+      const fw = C.num(fd.get('fw')); S.budget.school.foodWeek = fw; S.budget.summer.foodWeek = fw;
+      const roll = !!fd.get('roll'); if (roll && !S.rollover) S.rollSince = C.weekStart(C.today()); S.rollover = roll;
+      S.cats.forEach((c) => { const v = fd.get('c_' + c.id); if (v === null) return; b.amounts[c.id] = C.num(v); if (!mahi()) S.budget.summer.amounts[c.id] = C.num(v); });
+    } else if (step === 'bills') {
+      S.bills.forEach((x) => {
+        if (fd.get('bn_' + x.id) === null) return;
+        x.name = String(fd.get('bn_' + x.id)).trim(); x.amount = C.round2(C.num(fd.get('ba_' + x.id)));
+        x.day = Math.max(0, Math.min(31, Math.round(C.num(fd.get('bd_' + x.id))))) || null; x.cat = fd.get('bc_' + x.id) || x.cat;
+      });
+      S.bills = S.bills.filter((x) => x.name);
+      // A category budget should never be lower than the bills that land in it.
+      const need = {}; S.bills.forEach((x) => { need[x.cat] = C.round2((need[x.cat] || 0) + x.amount); });
+      Object.keys(need).forEach((c) => { if (c !== 'other' && (b.amounts[c] || 0) < need[c]) { b.amounts[c] = need[c]; if (!mahi()) S.budget.summer.amounts[c] = need[c]; } });
+    } else if (step === 'goals') {
+      Object.keys(b.savings).forEach((k) => { if (fd.get('sv_' + k) !== null) b.savings[k] = C.num(fd.get('sv_' + k)); });
+      ['mom', 'ins', 'trip'].forEach((k) => { if (fd.get('gt_' + k) !== null) S.goals[k].target = Math.max(0, C.num(fd.get('gt_' + k))); });
+      const d = fd.get('gd_ins'); if (d !== null) { S.goals.ins.due = d || ''; if (d && !S.goals.ins.start) S.goals.ins.start = C.addMonths(d, -6); }
+      S.setupDone = true; S.setupV = 2;
+    }
   }
+  const wizForm = () => { const f = $('#sheet form[data-form=wiz]'); if (f) wizSave(ui.wiz, new FormData(f)); };
 
   function addSheet(id) {
     const e = id ? S.expenses.find((x) => x.id === id) : null;
     const cat = e ? e.cat : ui.lastCat, acct = e ? e.account : S.lastAccount;
+    ui.rcpt = null; ui.rcptDel = false; ui.rcptFor = e ? e.id : null;
     openSheet(`<h2>${e ? 'Edit expense' : 'Add expense'}</h2><form data-form="expense"><input type="hidden" name="id" value="${id || ''}">
       <input class="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${e ? e.amount.toFixed(2) : ''}" required>
       <label class="f">Category</label><div class="chips">${S.cats.map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional" value="${esc(e ? e.note : '')}">
+      <label class="f">Receipt photo</label><div id="rcptbox">${rcptBoxHTML()}</div><input type="file" id="rcptfile" accept="image/*" hidden>
       <label class="f">Card or account</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === acct ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash" ${acct === 'cash' ? 'selected' : ''}>Cash or other</option></select>
       <label class="f">Date</label><input type="date" name="date" value="${e ? e.date : C.today()}">
       <label class="mt check"><input type="checkbox" name="forOther" data-toggle="personbox" ${e && e.forOther ? 'checked' : ''}>Bought for someone else</label>
@@ -689,7 +929,11 @@
       if (forOther && !person) { toast('Who was it for?'); return; }
       const rec = { amount, cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: cat === 'food' && !fd.get('household') };
       let exp = id ? S.expenses.find((x) => x.id === id) : null, msg = 'Saved';
-      if (exp) Object.assign(exp, rec); else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
+      if (exp) { revertBal(exp); Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
+      applyBal(exp);
+      if (ui.rcpt) { const id2 = exp.id, data = ui.rcpt; exp.receipt = true; V.putFile(id2, data).catch(() => toast('Could not save the photo')); }
+      else if (ui.rcptDel && exp.receipt) { exp.receipt = false; V.delFile(exp.id); }
+      ui.rcpt = null; ui.rcptDel = false;
       let iou = S.ious.find((i) => i.expenseId === exp.id);
       if (forOther) {
         const reason = rec.note || catName(cat);
@@ -759,24 +1003,29 @@
       S.csvMap = im.map; save(); csvToReview(); render();
     },
     afford(fd, form) { /* live only */ },
-    quicksetup(fd) {
-      const b = S.budget.school, s2 = S.budget.summer;
-      b.income = C.num(fd.get('inc')); b.foodWeek = C.num(fd.get('fw')); s2.foodWeek = b.foodWeek;
-      const put = (type, id, name, raw) => {
-        if (raw === null || String(raw).trim() === '') return;
-        const val = C.round2(C.num(raw)); const a = S.accounts.find((x) => x.type === type);
-        if (a) a.balance = val; else S.accounts.push({ id, name, last4: '', type, balance: val });
-      };
-      put('checking', 'chk', 'Checking', fd.get('bal'));
-      put('savings', 'sav', 'Savings', fd.get('sav'));
-      put('card', 'cc1', 'Credit cards', fd.get('cc'));
-      S.paySource = fd.get('src') === 'savings' ? 'savings' : 'checking';
-      if (!mahi()) S.cats.forEach((c) => {
-        if (c.id === 'other') return;
-        const v = fd.get('c_' + c.id); if (v === null) return;
-        b.amounts[c.id] = C.num(v); s2.amounts[c.id] = C.num(v);
-      });
-      S.setupDone = true; save(); closeSheet(); render(); setupDone();
+    wiz(fd) {
+      wizSave(ui.wiz, fd);
+      const i = WIZ.indexOf(ui.wiz);
+      if (ui.wiz === 'done') { S.setupDone = true; S.setupV = 2; save(); closeSheet(); render(); toast('All set'); return; }
+      save(); render(); wizShow(WIZ[i + 1]);
+    },
+    paycheck(fd) {
+      const amount = C.round2(C.num(fd.get('amount'))), date = fd.get('date') || C.today();
+      if (!(amount > 0)) { toast('Enter the amount'); return; }
+      const p = payPlan(amount, date);
+      S.paychecks = S.paychecks || []; S.paychecks.push({ id: uid(), date, amount });
+      if (fd.get('toGoals')) p.goals.forEach((g) => { if (S.goals[g.k]) S.goals[g.k].contribs.push({ id: uid(), date, amount: g.v, note: 'From paycheck' }); });
+      if (fd.get('toChk')) { const a = S.accounts.find((x) => x.type === 'checking'); if (a) a.balance = C.round2((a.balance || 0) + amount); }
+      save(); closeSheet(); render(); toast('Paycheck logged');
+    },
+    paycard(fd) {
+      const c = S.accounts.find((x) => x.id === fd.get('id')), src = S.accounts.find((x) => x.id === fd.get('from'));
+      const amt = C.round2(C.num(fd.get('amount')));
+      if (!c || !(amt > 0)) { toast('Enter an amount'); return; }
+      c.balance = C.round2((c.balance || 0) - amt);
+      if (src) src.balance = C.round2((src.balance || 0) - amt);
+      S.transfers = S.transfers || []; S.transfers.push({ id: uid(), date: fd.get('date') || C.today(), from: src ? src.id : '', to: c.id, amount: amt });
+      save(); closeSheet(); render(); toast('Payment logged');
     },
     async setup(fd) {
       if (fd.get('nolock')) {
@@ -842,6 +1091,7 @@
     editExp(d) { addSheet(d.id); },
     delExp(d) {
       const e = S.expenses.find((x) => x.id === d.id); if (!e) return;
+      revertBal(e); if (e.receipt) V.delFile(e.id);
       S.expenses = S.expenses.filter((x) => x !== e);
       S.ious = S.ious.filter((i) => !(i.expenseId === e.id && !i.payments.length));
       save(); closeSheet(); render(); toast('Deleted');
@@ -889,7 +1139,44 @@
       S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
       save(); setupForm();
     },
-    setupSkip() { S.setupDone = true; save(); closeSheet(); render(); },
+    setupSkip() { wizForm(); S.setupDone = true; S.dismissed.v2 = true; save(); closeSheet(); render(); },
+    dismissV2() { S.dismissed.v2 = true; save(); render(); },
+    dismissGaps() { S.dismissed['gap' + C.monthKey(C.today())] = true; save(); render(); },
+    dismissSubs() { S.dismissed['subs' + C.monthKey(C.today())] = true; save(); render(); },
+    wizBack() { wizForm(); save(); wizShow(WIZ[Math.max(0, WIZ.indexOf(ui.wiz) - 1)]); },
+    wizAddCard() { wizForm(); const n = S.accounts.filter((a) => a.type === 'card').length + 1; S.accounts.push({ id: uid(), name: 'Card ' + n, last4: '', type: 'card', balance: 0 }); save(); wizShow('accounts'); },
+    wizRmCard(d) {
+      wizForm();
+      if (S.expenses.some((e) => e.account === d.id) && !confirm('Purchases are logged on this card. Remove it anyway? The purchases stay.')) return;
+      S.accounts = S.accounts.filter((a) => a.id !== d.id); if (S.lastAccount === d.id) S.lastAccount = (S.accounts[0] || {}).id; save(); wizShow('accounts');
+    },
+    wizAddBill() { wizForm(); S.bills.push({ id: uid(), name: 'New bill', amount: 0, day: null, cat: 'subs' }); save(); wizShow('bills'); },
+    wizRmBill(d) { wizForm(); S.bills = S.bills.filter((b) => b.id !== d.id); save(); wizShow('bills'); },
+    subKeep(d) { const b = S.bills.find((x) => x.id === d.id); if (b) { b.reviewed = C.today(); save(); render(); toast('Checked. It will ask again in 3 months.'); } },
+    subCancel(d) { const b = S.bills.find((x) => x.id === d.id); if (b && confirm('Remove ' + b.name + ' from your bills? Past payments stay in your history.')) { S.bills = S.bills.filter((x) => x !== b); save(); render(); toast('Removed. That saves ' + fm(b.amount * 12) + ' a year.'); } },
+    icsOpen() {
+      const url = URL.createObjectURL(new Blob([icsText()], { type: 'text/calendar' }));
+      const a = document.createElement('a'); a.href = url; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+    },
+    async icsShare() { try { await saveFile(icsText(), 'money-reminders.ics', 'text/calendar'); } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); } },
+    paycheck() {
+      const t = C.today(), amt = perCheck(), hasChk = S.accounts.some((a) => a.type === 'checking');
+      openSheet(`<h2>I got paid</h2><p class="muted">See where this paycheck should go before you spend any of it.</p><form data-form="paycheck" data-live="pay"><label class="f">Take home amount</label><input class="amount" type="text" inputmode="decimal" name="amount" value="${amt ? amt.toFixed(2) : ''}" placeholder="0.00" autocomplete="off"><label class="f">Payday</label><input type="date" name="date" value="${t}"><div id="payout">${payPlanHTML(amt, t)}</div><label class="mt check"><input type="checkbox" name="toGoals" checked>Log the savings part to my goals</label>${hasChk ? `<label class="check"><input type="checkbox" name="toChk" ${S.autoBal ? 'checked' : ''}>Add it to my checking balance</label>` : ''}<div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+      applyWidths();
+    },
+    payCard(d) {
+      const c = S.accounts.find((x) => x.id === d.id), srcs = S.accounts.filter((a) => a.type !== 'card');
+      openSheet(`<h2>Paid ${esc(c.name)}</h2><form data-form="paycard"><input type="hidden" name="id" value="${c.id}"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" value="${(c.balance || 0).toFixed(2)}" autocomplete="off"><label class="f">Paid from</label><select name="from">${srcs.map((a) => `<option value="${a.id}" ${a.type === payType() ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="">Somewhere else</option></select><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><p class="muted small">Lowers what the card owes and takes it out of the account you pick.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+    },
+    toggleAutoBal(d, el) { S.autoBal = el.checked; if (S.autoBal) S.balSince = C.today(); save(); render(); toast(S.autoBal ? 'Purchases from today on will update balances' : 'Automatic balances off'); },
+    toggleRoll(d, el) { S.rollover = el.checked; if (S.rollover && !S.rollSince) S.rollSince = C.weekStart(C.today()); save(); render(); },
+    rcptPick() { $('#rcptfile').click(); },
+    rcptClear() { ui.rcpt = null; ui.rcptDel = true; $('#rcptbox').innerHTML = rcptBoxHTML(); },
+    async rcptView() {
+      const box = $('#rcptbox');
+      try { const data = await V.getFile(ui.rcptFor); box.innerHTML = data ? `<img class="thumb big" src="${data}" alt="Receipt"><button type="button" class="mt8 btn small danger" data-act="rcptClear">Remove photo</button>` : '<p class="muted small">Photo not found.</p>'; }
+      catch (e) { toast('Could not open the photo'); }
+    },
     quickSetup() { setupStart(); },
     dismissBackup() { S.dismissed['bk' + C.today()] = true; save(); render(); },
     dismissSun() { S.dismissed['sun' + C.today()] = true; save(); render(); },
@@ -932,8 +1219,8 @@
     // bills
     billPaid(d) {
       const mk = ui.bmk || C.monthKey(C.today()), b = S.bills.find((x) => x.id === d.id);
-      if (billPaid(b, mk)) S.expenses = S.expenses.filter((e) => !(e.billId === b.id && C.monthKey(e.date) === mk));
-      else S.expenses.push({ id: uid(), amount: b.amount, cat: b.cat, note: b.name, account: S.lastAccount, date: mk === C.monthKey(C.today()) ? C.today() : mk + '-01', paidFromSavings: false, forOther: '', takeout: false, billId: b.id, source: 'bill' });
+      if (billPaid(b, mk)) S.expenses = S.expenses.filter((e) => { const hit = e.billId === b.id && C.monthKey(e.date) === mk; if (hit) revertBal(e); return !hit; });
+      else { const e = { id: uid(), amount: b.amount, cat: b.cat, note: b.name, account: S.lastAccount, date: mk === C.monthKey(C.today()) ? C.today() : mk + '-01', paidFromSavings: false, forOther: '', takeout: false, billId: b.id, source: 'bill' }; S.expenses.push(e); applyBal(e); }
       save(); render();
     },
     addBill() { billSheet(); },
@@ -956,7 +1243,8 @@
       im.items.forEach((x) => {
         if (!x.on || !(x.amount > 0)) return;
         const hh = x.cat === '__hh';
-        S.expenses.push({ id: uid(), amount: C.round2(x.amount), cat: hh ? 'other' : x.cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, forOther: '', takeout: x.cat === 'food', source: im.kind });
+        const e = { id: uid(), amount: C.round2(x.amount), cat: hh ? 'other' : x.cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, forOther: '', takeout: x.cat === 'food', source: im.kind };
+        S.expenses.push(e); applyBal(e);
         n++;
       });
       S.lastAccount = acct; ui.imp = null; save(); render(); toast(n + ' saved');
@@ -1017,6 +1305,9 @@
   document.addEventListener('input', (ev) => {
     const f = ev.target.closest('form[data-live=afford]');
     if (f) { const fd = new FormData(f); $('#affout').innerHTML = affordHTML(C.num(fd.get('price')), fd.get('cat')); applyWidths(); }
+    const pf = ev.target.closest('form[data-live=pay]');
+    if (pf) { const fd = new FormData(pf); $('#payout').innerHTML = payPlanHTML(C.num(fd.get('amount')), fd.get('date') || C.today()); }
+    if (ev.target.id === 'hq') { ui.hq = ev.target.value; ui.hist = 40; $('#histlist').innerHTML = histListHTML(); }
   });
   // Redraw only when no form box on the page has focus, so tapping from one box
   // to the next does not close the keyboard.
@@ -1047,6 +1338,13 @@
       if (f === 'on' || f === 'amount') render();
       return;
     }
+    if (el.id === 'hcat' || el.id === 'hrng') { ui[el.id] = el.value; ui.hist = 40; $('#histlist').innerHTML = histListHTML(); return; }
+    if (el.id === 'rtc') { ui.rtc = el.value; render(); return; }
+    if (el.id === 'rcptfile' && el.files[0]) {
+      const f = el.files[0]; el.value = '';
+      try { ui.rcpt = await shrinkImage(f); ui.rcptDel = false; $('#rcptbox').innerHTML = rcptBoxHTML(); } catch (e) { toast('Could not read that photo'); }
+      return;
+    }
     if (el.id === 'csvfile' && el.files[0]) { try { await handleCsv(el.files[0]); } catch (e) { toast('Could not read that file'); } el.value = ''; }
     if (el.id === 'imgfile' && el.files[0]) { const f = el.files[0]; el.value = ''; await handleImg(f); }
     if (el.id === 'bkfile' && el.files[0]) {
@@ -1074,7 +1372,9 @@
     catch (e) { const err = $('#lockerr'); if (err) err.textContent = 'Face ID did not work. Use your passcode.'; }
   };
   function startSession() {
-    fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null; render();
+    fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null;
+    if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
+    render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
   async function lock() {

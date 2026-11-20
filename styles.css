@@ -124,3 +124,12 @@ html[data-theme=mint]{--g:#059669;--y:#d97706;--r:#dc2626}
 .rlist summary::-webkit-details-marker{display:none}
 .rlist[open] summary{margin-bottom:4px}
 .btn:disabled{opacity:.4}
+.two>div{flex:1;min-width:0}.two>select,.two>input{flex:1;min-width:0}
+.card.inset{background:var(--bg);border-radius:18px;padding:14px 16px;margin:10px 0 12px}
+.thumb{display:block;max-width:100%;max-height:180px;border-radius:12px;border:1.5px solid var(--line)}
+.thumb.big{max-height:none}
+.trend{display:block;width:100%;height:auto;margin:12px 0 4px}
+.trend .tb{fill:var(--blue);opacity:.45}.trend .tb.cur{opacity:1}
+.trend text{font-family:inherit;text-anchor:middle;font-size:11px}
+.trend .tl{fill:var(--muted)}.trend .tv{fill:var(--text);font-weight:700}
+.trend .tp{stroke:var(--y);stroke-width:1.5;stroke-dasharray:5 4}
