@@ -146,6 +146,36 @@
     if (fw > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>`;
     return h;
   }
+  // ---------- money left over each month goes to savings ----------
+  const LO = () => (S.leftover = S.leftover || { start: C.monthKey(C.today()), before: 0, moved: {} });
+  function monthIncome(mk) { const p = sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount); return p > 0 ? C.round2(p) : incomeOf(S.mode); }
+  const monthOut = (mk) => C.round2(sum(S.expenses.filter((e) => counted(e) && C.monthKey(e.date) === mk), (e) => e.amount));
+  const leftoverOf = (mk) => C.round2(monthIncome(mk) - monthOut(mk));
+  // This month, assuming every bill gets paid and all the weekly money gets spent.
+  function projectedLeftover(mk) {
+    const b = budgetOf(), ms = monthSpend(mk);
+    const fixedLeft = sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => Math.max(0, (b.amounts[c.id] || 0) - (ms[c.id] || 0)));
+    const flexLeft = Math.max(0, poolMonth() - sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0));
+    return C.round2(monthIncome(mk) - monthOut(mk) - fixedLeft - flexLeft);
+  }
+  function savedThisYear() {
+    const lo = LO(), cur = C.monthKey(C.today()), yr = cur.slice(0, 4), months = [];
+    for (let mk = lo.start > yr + '-01' ? lo.start : yr + '-01'; mk < cur; mk = C.shiftMonthKey(mk, 1)) months.push({ mk, v: leftoverOf(mk) });
+    const before = lo.start.slice(0, 4) === yr ? lo.before || 0 : 0;
+    return { total: C.round2(before + sum(months, (m) => m.v)), months, before };
+  }
+  function savingsCard() {
+    const lo = LO(), cur = C.monthKey(C.today()), y = savedThisYear(), proj = projectedLeftover(cur), last = C.shiftMonthKey(cur, -1);
+    let inner = `<p class="big g">${fm(y.total)}</p><p class="muted">Saved in ${cur.slice(0, 4)} from money left over each month.</p>`;
+    inner += `<div class="row item"><span>${C.monthName(cur)}, on track to save</span><b class="${proj < 0 ? 'r' : 'g'}">${proj < 0 ? fm(proj) + ' short' : fm(proj)}</b></div>`;
+    inner += `<p class="muted small">If you pay every bill and spend all your weekly money. Every dollar of the ${fm(budgetOf().foodWeek)} a week you skip adds to it.${cur < lo.start ? ' Tracking starts ' + C.monthName(lo.start) + '.' : ''}</p>`;
+    if (y.months.length || y.before) inner += '<p class="label mt">This year</p>' + (y.before ? `<div class="row item"><span>Before tracking</span><b>${fm(y.before)}</b></div>` : '') +
+      y.months.slice().reverse().map((m) => `<div class="row item"><span>${C.monthName(m.mk)}${lo.moved[m.mk] !== undefined ? '<span class="pill g">Moved</span>' : ''}</span><b class="${m.v < 0 ? 'r' : 'g'}">${m.v < 0 ? fm(m.v) + ' short' : fm(m.v)}</b></div>`).join('');
+    const lv = leftoverOf(last);
+    if (last >= lo.start && lo.moved[last] === undefined && lv > 0) inner += `<div class="card inset"><p class="med">${C.monthName(last)} left you ${fm(lv)}</p><p class="muted small">Move it from checking to savings, then tap below.</p><button class="mt8 btn primary" data-act="moveLeftover" data-mk="${last}">I moved it to savings</button></div>`;
+    inner += `<p class="muted small mt8">Bonus this month: ${fm(bonusInMonth(cur))}. Bonus money goes straight to a goal.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`;
+    return card('Savings', inner);
+  }
   // Where this week's spending money went, by type.
   function weekBreakdown(ws) {
     const we = C.addDays(ws, 6), by = {};
@@ -196,6 +226,7 @@
       t = sum(g.contribs.filter((c) => c.date >= st), (c) => c.amount) +
         sum(S.expenses.filter((e) => e.cat === 'insurance' && counted(e) && e.date >= st), (e) => e.amount);
     } else t = sum(g.contribs, (c) => c.amount);
+    if (k === 'mom') t += sum(S.expenses.filter((e) => e.cat === 'mompay' && counted(e)), (e) => e.amount);
     if (k === 'gen') t -= sum(S.expenses.filter((e) => e.paidFromSavings), (e) => e.amount);
     return C.round2(t);
   }
@@ -333,8 +364,7 @@
     const billsDue = S.bills, paidN = billsDue.filter((x) => billPaid(x, mk)).length, unpaid = sum(billsDue.filter((x) => !billPaid(x, mk)), (x) => x.amount);
     if (billsDue.length) h += card('Bills this month', `<p class="med">${paidN} of ${billsDue.length} paid</p>${bar(paidN / billsDue.length, paidN === billsDue.length ? 'g' : 'b')}<p class="muted">${unpaid > 0 ? fm(unpaid) + ' still to pay from your monthly income.' : 'All paid. Nothing else to plan this month.'}</p><button class="mt8 btn small" data-act="openMore" data-v="bills">Recurring bills</button>`);
 
-    const saved = savedInMonth(mk), sp2 = plannedSavings();
-    h += card('Savings this month', `<p class="big g">${fm(saved)} <span class="muted med">of ${fm(sp2)}</span></p>${bar(sp2 ? saved / sp2 : 0, 'b')}<p class="muted small">Bonus this month: ${fm(bonusInMonth(mk))}. Bonus money goes straight to savings and is never income.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`);
+    h += savingsCard();
 
     const owed = S.ious.filter((i) => !i.settled && i.dir === 'owedToMe');
     const od = owed.filter((i) => C.daysBetween(i.date, t) > 14).length;
@@ -443,7 +473,7 @@
     let h = `<div class="head"><h1 class="title">Goals</h1></div><div class="sub">Savings and payback</div>`;
     h += `<button class="mb16 btn primary" data-act="logBonus">Log bonus</button>`;
     // mom
-    const mom = S.goals.mom, momTot = goalTotal('mom'), momLeft = Math.max(0, mom.target - momTot), momMonthly = b.savings.mom || 0;
+    const mom = S.goals.mom, momTot = goalTotal('mom'), momLeft = Math.max(0, mom.target - momTot), momMonthly = (b.amounts.mompay || 0) + (b.savings.mom || 0);
     h += goalCard('mom', mom.target ? `<p class="big">${fm(momLeft)} <span class="muted med">left of ${fm(mom.target)}</span></p>${bar(mom.target ? momTot / mom.target : 0, 'g')}<p class="muted">${momLeft === 0 ? 'Paid off.' : momMonthly ? Math.ceil(momLeft / momMonthly) + ' months left at ' + fm(momMonthly) + ' a month.' : 'Set a monthly amount in Budget and income.'}</p>` : `<p class="muted">Enter the total you owe to see months left at ${fm(momMonthly)} a month.</p><p>Paid back so far: <b>${fm(momTot)}</b></p>`);
     // insurance
     const ins = S.goals.ins, insTot = goalTotal('ins');
@@ -546,10 +576,12 @@
     h += card('Spending types', '<p class="muted small">The kinds of things your weekly money goes to. Rename them or add your own.</p>' + S.cats.map((c, i) => c.kind !== 'flex' ? '' : `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" value="${esc(c.name)}">${c.id === 'other' ? '' : `<button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button>`}</div>`).join('') + '<button class="mt btn" data-act="addType">Add a type</button>');
     h += card('Monthly bills and fixed costs', S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join(''));
     h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
+    const lo = LO();
+    h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
     h += card('Monthly savings targets', Object.keys(b.savings).map((k) => `<label class="f">${labels[k] || k}</label><input type="text" inputmode="decimal" data-path="budget.${m}.savings.${k}" data-t="n" data-re="1" value="${b.savings[k]}">`).join(''));
     const inc = incomeOf(m), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv);
-    h += card('Plan check', `<div class="row"><span>Income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending</span><b>${fm(sp)}</b></div><div class="row"><span>Savings</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Unassigned'}</span><b class="${left < 0 ? 'r' : left === 0 ? 'g' : ''}">${fm(left)}</b></div>`);
+    h += card('Plan check', `<div class="row"><span>Income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending</span><b>${fm(sp)}</b></div><div class="row"><span>Savings</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Left over to savings'}</span><b class="${left < 0 ? 'r' : left === 0 ? 'g' : ''}">${fm(left)}</b></div>`);
     return h;
   }
 
@@ -733,7 +765,7 @@
     const p = payPlan(amount, date), row = (n, v, cls) => `<div class="row item"><span>${n}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
     let h = '<div class="card inset">' + row('Bills and fixed costs', p.fixed) + (p.flex ? row('Shopping and other', p.flex) : '') + row(`Spending money, ${p.weeks} week${p.weeks === 1 ? '' : 's'}`, p.food) +
       p.goals.map((g) => row('Save: ' + esc(S.goals[g.k] ? S.goals[g.k].name : g.k), g.v, 'g')).join('') +
-      row(p.left < 0 ? 'Short by' : 'Left over, free to use', p.left, p.left < 0 ? 'r' : 'g') + '</div>';
+      row(p.left < 0 ? 'Short by' : 'Left over for savings', p.left, p.left < 0 ? 'r' : 'g') + '</div>';
     if (p.left < 0) h += `<p class="small r">This check is ${fm(-p.left)} short of your plan. You can skip some savings this once, or fix the budget so future checks cover it.</p><button type="button" class="mt8 btn" data-act="fixBudget">Fix the budget for future checks</button>`;
     h += p.dueSoon.length ? `<p class="label mt">Due before your next check (${C.shortDate(p.next)})</p>` + p.dueSoon.sort((a, c) => (a.d < c.d ? -1 : 1)).map((x) => row(esc(x.b.name) + ', ' + C.shortDate(x.d), x.b.amount)).join('') : '<p class="muted small mt8">No bills with due days fall before your next check.</p>';
     return h;
@@ -942,7 +974,7 @@
         `<label class="f">${esc(g.trip.name)}: target</label>${mIn('gt_trip', g.trip.target)}`;
     } else {
       const inc = incomeOf(S.mode), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv), gaps = setupGaps();
-      body = `<div class="card inset"><div class="row"><span>Monthly income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending plan</span><b>${fm(sp)}</b></div><div class="row"><span>Savings plan</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Unassigned'}</span><b class="${left < 0 ? 'r' : 'g'}">${fm(left)}</b></div></div>` +
+      body = `<div class="card inset"><div class="row"><span>Monthly income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending plan</span><b>${fm(sp)}</b></div><div class="row"><span>Savings plan</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Left over to savings'}</span><b class="${left < 0 ? 'r' : 'g'}">${fm(left)}</b></div></div>` +
         (left < 0 ? '<p class="small r">Your plan spends more than you make. Go Back and trim something.</p>' : '') +
         (gaps.length ? '<p class="label mt">Still missing</p>' + gaps.map((x) => `<p class="small y">${x[0]}</p>`).join('') : '') +
         `<p class="label mt">Last few things</p><div class="col"><button type="button" class="btn" data-act="exportBackup">Back up now${S.lastBackup ? ', last ' + C.shortDate(S.lastBackup) : ''}</button><button type="button" class="btn" data-act="icsOpen">Put bill reminders on my calendar</button>${V.isAuto() ? '<button type="button" class="btn" data-act="setPinNow">Set a PIN</button>' : ''}</div><p class="muted small mt8">Text size and themes are in Settings. Tap I got paid on Home every payday to plan the check.</p>`;
@@ -1188,6 +1220,16 @@
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
     logGas() { addSheet(null, 'gas'); },
+    moveLeftover(d) {
+      const lo = LO(), amt = leftoverOf(d.mk); if (!(amt > 0)) return;
+      lo.moved[d.mk] = amt;
+      S.goals.gen.contribs.push({ id: uid(), date: C.today(), amount: amt, note: 'Left over from ' + C.monthName(d.mk) });
+      if (S.autoBal) {
+        const chk = S.accounts.find((a) => a.type === 'checking'), sav = S.accounts.find((a) => a.type === 'savings');
+        if (chk && sav) { chk.balance = C.round2((chk.balance || 0) - amt); sav.balance = C.round2((sav.balance || 0) + amt); }
+      }
+      save(); render(); toast(fm(amt) + ' added to savings');
+    },
     addType() { S.cats.splice(S.cats.findIndex((c) => c.id === 'other'), 0, { id: uid(), name: 'New type', kind: 'flex' }); save(); render(); },
     delType(d) {
       const n = S.expenses.filter((e) => e.cat === d.id).length, c = S.cats.find((x) => x.id === d.id); if (!c) return;
@@ -1510,6 +1552,8 @@
     removeDadPayment();
     poolSpending();
     addSpendTypes();
+    momStrict();
+    LO();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
@@ -1548,6 +1592,16 @@
     if (!S.cats.some((c) => c.id === 'shop')) add.push({ id: 'shop', name: 'Shopping', kind: 'flex' });
     S.cats.splice(at < 0 ? S.cats.length : at, 0, ...add);
     S.spendTypes = true; save();
+  }
+  // One time: Mom payback becomes a strict $150 monthly bill, and savings come from what is left over.
+  function momStrict() {
+    if (S.persona === 'blank' || S.momStrict) return;
+    if (!S.cats.some((c) => c.id === 'mompay')) { const at = S.cats.findIndex((c) => c.id === 'subs'); S.cats.splice(at < 0 ? 0 : at, 0, { id: 'mompay', name: 'Mom payback', kind: 'fixed' }); }
+    ['school', 'summer'].forEach((m) => { const b = S.budget[m]; b.amounts.mompay = 150; b.savings.mom = 0; b.savings.gen = 0; });
+    if (!S.bills.some((x) => x.cat === 'mompay')) S.bills.push({ id: 'bmom', name: 'Mom payback', amount: 150, day: null, cat: 'mompay' });
+    LO().start = C.shiftMonthKey(C.monthKey(C.today()), 1);
+    S.momStrict = true; save();
+    setTimeout(() => toast('Mom payback is now a strict $150 a month'), 900);
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
