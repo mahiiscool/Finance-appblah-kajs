@@ -33,7 +33,7 @@
 
   // ---------- default data ----------
   function defaultState() {
-    const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 260, amazon: 80, other: 0 };
+    const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 0, amazon: 0, other: 0 };
     return {
       v: 1, persona: 'mahi', mode: 'school',
       cats: [
@@ -41,12 +41,12 @@
         { id: 'flexpay', name: 'Flex pay', kind: 'fixed' }, { id: 'dad', name: "Dad's payment", kind: 'fixed' },
         { id: 'phone', name: 'Phone', kind: 'fixed' }, { id: 'gym', name: 'Gym', kind: 'fixed' },
         { id: 'haircut', name: 'Haircut', kind: 'fixed' }, { id: 'subs', name: 'Subscriptions', kind: 'fixed' },
-        { id: 'food', name: 'Food and fun', kind: 'flex' }, { id: 'amazon', name: 'Amazon essentials', kind: 'flex' },
+        { id: 'food', name: 'Food', kind: 'flex' }, { id: 'amazon', name: 'Amazon essentials', kind: 'flex' },
         { id: 'other', name: 'Other', kind: 'flex' }
       ],
       budget: {
-        school: { amounts: Object.assign({}, amounts), foodWeek: 65, income: 1300, savings: { mom: 150, gen: 106.53 } },
-        summer: { amounts: Object.assign({}, amounts), foodWeek: 65, pay: 0, freq: 'biweekly', savings: { mom: 300, trip: 200, gen: 300 } }
+        school: { amounts: Object.assign({}, amounts), foodWeek: 60, income: 1300, savings: { mom: 150, gen: 106.53 } },
+        summer: { amounts: Object.assign({}, amounts), foodWeek: 60, pay: 0, freq: 'biweekly', savings: { mom: 300, trip: 200, gen: 300 } }
       },
       accounts: [{ id: 'chk', name: 'Checking', last4: '', type: 'checking', balance: 0 }],
       expenses: [], ious: [],
@@ -122,16 +122,20 @@
     const f = { weekly: 52 / 12, biweekly: 26 / 12, semimonthly: 2, monthly: 1 }[b.freq] || 1;
     return C.round2(b.pay * f);
   }
-  const plannedSpend = () => sum(S.cats.filter((c) => c.id !== 'other'), (c) => budgetOf().amounts[c.id] || 0);
+  const plannedSpend = () => C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => budgetOf().amounts[c.id] || 0) + poolMonth());
   const plannedSavings = () => sum(Object.values(budgetOf().savings));
   function monthSpend(mk) {
     const m = {};
     S.expenses.forEach((e) => { if (counted(e) && C.monthKey(e.date) === mk) m[e.cat] = (m[e.cat] || 0) + e.amount; });
     return m;
   }
+  // One weekly "spending money" limit covers every flexible category (food, shopping, other).
+  // Fixed categories are bills with their own monthly amounts.
+  const isFlex = (cat) => { const c = S.cats.find((x) => x.id === cat); return !c || c.kind === 'flex'; };
+  const poolMonth = (m) => C.round2((budgetOf(m).foodWeek || 0) * 52 / 12);
   function weekSpend(ws, cat) {
     const we = C.addDays(ws, 6);
-    return sum(S.expenses.filter((e) => counted(e) && e.cat === (cat || 'food') && e.date >= ws && e.date <= we), (e) => e.amount);
+    return sum(S.expenses.filter((e) => counted(e) && (cat ? e.cat === cat : isFlex(e.cat)) && e.date >= ws && e.date <= we), (e) => e.amount);
   }
   function daysToSunday() { const d = new Date().getDay(); return (7 - d) % 7 || 7; }
   function goalTotal(k) {
@@ -195,7 +199,7 @@
   const FREQS = [['weekly', 'Every week'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Once a month']];
   const payFreq = () => (S.mode === 'summer' ? S.budget.summer.freq : S.payFreq) || 'biweekly';
   const perCheck = () => (S.mode === 'summer' ? S.budget.summer.pay || 0 : C.round2(incomeOf('school') / PER_MONTH[payFreq()]));
-  // Weekly food and fun limit, plus anything left over from earlier weeks when rollover is on.
+  // Weekly spending money limit, plus anything left over from earlier weeks when rollover is on.
   function weekLimit(ws) {
     const base = budgetOf().foodWeek || 0;
     if (!S.rollover || !S.rollSince || !base) return base;
@@ -211,7 +215,7 @@
     const g = [], nd = S.bills.filter((b) => !b.day).length;
     if (!incomeOf(S.mode)) g.push(['Add your income', 'budgetEdit']);
     if (nd) g.push([nd + ' bill' + (nd === 1 ? ' has' : 's have') + ' no due day', 'bills']);
-    if (!budgetOf().foodWeek) g.push(['Set a weekly food and fun limit', 'budgetEdit']);
+    if (!budgetOf().foodWeek) g.push(['Set your weekly spending money', 'budgetEdit']);
     if (!S.accounts.some((a) => a.balance)) g.push(['Enter your account balances', 'cards']);
     return g;
   }
@@ -271,7 +275,7 @@
     }
 
     const ws = C.weekStart(t), fw = weekLimit(ws), sp = weekSpend(ws), left = fw - sp;
-    h += card('Left to spend this week', `<p class="big ${left < 0 ? 'r' : 'g'}">${fm(left)} ${left < 0 ? 'over' : 'left'}</p><p class="muted">${fm(sp)} of ${fm(fw)} on food and fun. ${daysToSunday()} days until Sunday.${fw > b.foodWeek ? ' Includes ' + fm(fw - b.foodWeek) + ' rolled over.' : ''}</p>${bar(fw ? sp / fw : 0, C.status(fw ? sp / fw : 0))}`);
+    h += card('Left to spend this week', `<p class="big ${left < 0 ? 'r' : 'g'}">${fm(left)} ${left < 0 ? 'over' : 'left'}</p><p class="muted">${fm(sp)} of ${fm(fw)} spending money used. ${daysToSunday()} days until Sunday.${fw > b.foodWeek ? ' Includes ' + fm(fw - b.foodWeek) + ' rolled over.' : ''}</p>${bar(fw ? sp / fw : 0, C.status(fw ? sp / fw : 0))}`);
 
     const ms = monthSpend(mk), spent = sum(Object.values(ms)), plan = plannedSpend();
     const over = S.cats.filter((c) => (b.amounts[c.id] || 0) > 0 && (ms[c.id] || 0) > b.amounts[c.id]).length;
@@ -290,7 +294,7 @@
     const sd = subsDue();
     if (sd.length && !S.dismissed['subs' + mk]) h += card('Subscription check', `<p class="med">${sd.length} subscription${sd.length === 1 ? '' : 's'} to review</p><p class="muted">${esc(sd.slice(0, 3).map((b) => b.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?</p><div class="btns"><button class="btn" data-act="dismissSubs">Later</button><button class="btn primary" data-act="openMore" data-v="bills">Review</button></div>`);
     const st = takeoutStreak();
-    h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food and fun purchase.' : 'No food and fun logged yet.'}</p>`);
+    h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food purchase.' : 'No food logged yet.'}</p>`);
 
     h += `<button class="mb14 btn primary" data-act="paycheck">I got paid</button><div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
     return h;
@@ -308,17 +312,21 @@
     const sp = weekSpend(ws), fw = weekLimit(ws), left = fw - sp, pct = fw ? sp / fw : 0;
     let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
     const sub = ui.wOff === 0 ? `${daysToSunday()} days until Sunday` : (left < 0 ? 'over' : 'left');
-    h += card('Food and fun', ring(pct, C.status(pct), fm(left), left < 0 ? 'over budget' : 'left') +
+    h += card('Spending money', ring(pct, C.status(pct), fm(left), left < 0 ? 'over budget' : 'left') +
       `<p class="tc muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` + (fw > b.foodWeek ? `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>` : '') +
       (ui.wOff === 0 && left > 0 ? `<p class="tc muted small">About ${fm(left / daysToSunday())} a day to stay on track.</p>` : ''));
-    const list = S.expenses.filter((e) => counted(e) && e.cat === 'food' && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
-    h += card('Food and fun this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
+    const list = S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
+    h += card('Spent this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
     return h;
   }
   function MonthView() {
     const mk = ui.mk || C.monthKey(C.today()), b = budgetOf(), ms = monthSpend(mk);
     let h = monthNav(mk, 'mnav');
-    const rows = S.cats.filter((c) => (b.amounts[c.id] || 0) > 0 || (ms[c.id] || 0) > 0).map((c) => {
+    const flexSp = sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0), pm = poolMonth();
+    const parts = S.cats.filter((c) => c.kind === 'flex' && ms[c.id]).map((c) => esc(c.name) + ' ' + fm(ms[c.id])).join(', ');
+    const pp = pm ? flexSp / pm : (flexSp ? 2 : 0), pc = C.status(pp);
+    const poolRow = `<div class="item"><div class="row"><span class="t">Spending money</span><span class="${pc}">${fm(flexSp)} of ${fm(pm)}</span></div>${bar(pp, pc)}<div class="muted small">${flexSp > pm ? fm(flexSp - pm) + ' over' : fm(pm - flexSp) + ' left'}${parts ? '. ' + parts : ''}</div></div>`;
+    const rows = poolRow + S.cats.filter((c) => c.kind === 'fixed' && ((b.amounts[c.id] || 0) > 0 || (ms[c.id] || 0) > 0)).map((c) => {
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
@@ -481,8 +489,9 @@
     h += `<div class="seg"><button class="${m === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${m === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
     if (m === 'school') h += card('Income', `<label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" data-path="budget.school.income" data-t="n" data-re="1" value="${b.income}"><label class="f">How often you get paid</label><select data-path="payFreq" data-t="s" data-re="1">${FREQS.map((o) => `<option value="${o[0]}" ${S.payFreq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted small">Bonus money like tips is logged separately and never counted as income.</p>`);
     else h += card(mahi() ? 'Toyota co op pay' : 'Summer job pay', `<label class="f">Pay per check</label><input type="text" inputmode="decimal" data-path="budget.summer.pay" data-t="n" data-re="1" value="${b.pay || ''}"><label class="f">How often</label><select data-path="budget.summer.freq" data-t="s" data-re="1">${[['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Monthly']].map((o) => `<option value="${o[0]}" ${b.freq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted">About ${fm(incomeOf('summer'))} a month.</p>`);
-    h += card('Monthly spending budget', S.cats.filter((c) => c.id !== 'other').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id]}">`).join('') + `<label class="f">Food and fun per week</label><input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}">`);
-    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent food and fun into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
+    h += card('Weekly spending money', `<input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}"><p class="muted small">One limit for food, Amazon, and anything else that is not a bill. About ${fm(poolMonth(m))} a month.</p>`);
+    h += card('Monthly bills and fixed costs', S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join(''));
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
     h += card('Monthly savings targets', Object.keys(b.savings).map((k) => `<label class="f">${labels[k] || k}</label><input type="text" inputmode="decimal" data-path="budget.${m}.savings.${k}" data-t="n" data-re="1" value="${b.savings[k]}">`).join(''));
     const inc = incomeOf(m), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv);
@@ -498,7 +507,15 @@
     const t = C.today(), mk = C.monthKey(t), b = budgetOf(), ms = monthSpend(mk), ws = C.weekStart(t);
     const line = (label, left, after) => `<div class="item"><div class="t">${label}</div><div class="row"><span class="muted">Now</span><span>${fm(left)} ${left < 0 ? 'over' : 'left'}</span></div><div class="row"><span class="muted">After</span><b class="${after < 0 ? 'r' : after < price ? 'y' : 'g'}">${fm(after)} ${after < 0 ? 'over' : 'left'}</b></div></div>`;
     let out = '';
-    if (cat === 'food') { const l = weekLimit(ws) - weekSpend(ws); out += line('This week, food and fun', l, l - price); }
+    if (isFlex(cat)) {
+      const l = weekLimit(ws) - weekSpend(ws); out += line('This week, spending money', l, l - price);
+      const flexM = sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0), pl = poolMonth() - flexM;
+      out += line('This month, spending money', pl, pl - price);
+      const tl0 = plannedSpend() - sum(Object.values(ms));
+      out += line('This month, whole budget', tl0, tl0 - price);
+      const bad = l - price < 0 || pl - price < 0;
+      return card('Impact', (bad ? '<p class="med r">That puts you over your spending money.</p>' : (l - price < price ? '<p class="med y">It fits, but this week gets tight.</p>' : '<p class="med g">It fits comfortably.</p>')) + out);
+    }
     const cl = (b.amounts[cat] || 0) - (ms[cat] || 0);
     out += line('This month, ' + esc(catName(cat)), cl, cl - price);
     const tl = plannedSpend() - sum(Object.values(ms));
@@ -523,8 +540,8 @@
 
     h += trend;
     if (isW) {
-      const fw = weekLimit(r.from), fs = r.byCat.food || 0;
-      if (fw) h += card('Food and fun', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fs / fw, C.status(fs / fw))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
+      const fw = weekLimit(r.from), fs = C.round2(sum(Object.keys(r.byCat).filter(isFlex), (k) => r.byCat[k]));
+      if (fw) h += card('Spending money', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fs / fw, C.status(fs / fw))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
     }
 
     const cats = Object.keys(r.byCat).sort((a, c) => r.byCat[c] - r.byCat[a]);
@@ -606,7 +623,7 @@
       pts.push({ n, v: sum(S.expenses.filter((e) => counted(e) && (!cat || e.cat === cat) && e.date >= a && e.date <= b), (e) => e.amount) });
     }
     const bo = budgetOf();
-    const plan = cat ? (isW ? (cat === 'food' ? bo.foodWeek : 0) : bo.amounts[cat] || 0) : (isW ? 0 : plannedSpend());
+    const plan = cat ? (isFlex(cat) ? 0 : isW ? 0 : bo.amounts[cat] || 0) : (isW ? 0 : plannedSpend());
     const W = 320, H = 160, top = 18, bot = 22, mx = Math.max(plan, ...pts.map((p) => p.v), 1), bw = W / pts.length;
     const y = (v) => top + (H - top - bot) * (1 - v / mx);
     let svg = `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending trend">`;
@@ -644,7 +661,7 @@
   function payPlan(amount, date) {
     const f = PER_MONTH[payFreq()] || 1, share = 1 / f, b = budgetOf();
     const fixed = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0) * share);
-    const flex = C.round2(sum(S.cats.filter((c) => c.kind === 'flex' && c.id !== 'food'), (c) => b.amounts[c.id] || 0) * share);
+    const flex = 0;
     const weeks = Math.round((52 / 12 / f) * 10) / 10, food = C.round2((b.foodWeek || 0) * weeks);
     const goals = Object.keys(b.savings).map((k) => ({ k, v: C.round2((b.savings[k] || 0) * share) })).filter((g) => g.v > 0);
     const saving = sum(goals, (g) => g.v), left = C.round2(amount - fixed - flex - food - saving);
@@ -660,7 +677,7 @@
   function payPlanHTML(amount, date) {
     if (!(amount > 0)) return '<p class="muted small">Enter the amount to see the plan.</p>';
     const p = payPlan(amount, date), row = (n, v, cls) => `<div class="row item"><span>${n}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
-    let h = '<div class="card inset">' + row('Bills and fixed costs', p.fixed) + (p.flex ? row('Shopping and other', p.flex) : '') + row(`Food and fun, ${p.weeks} week${p.weeks === 1 ? '' : 's'}`, p.food) +
+    let h = '<div class="card inset">' + row('Bills and fixed costs', p.fixed) + (p.flex ? row('Shopping and other', p.flex) : '') + row(`Spending money, ${p.weeks} week${p.weeks === 1 ? '' : 's'}`, p.food) +
       p.goals.map((g) => row('Save: ' + esc(S.goals[g.k] ? S.goals[g.k].name : g.k), g.v, 'g')).join('') +
       row(p.left < 0 ? 'Short by' : 'Left over, free to use', p.left, p.left < 0 ? 'r' : 'g') + '</div>';
     if (p.left < 0) h += `<p class="small r">This check is ${fm(-p.left)} short of your plan. You can skip some savings this once, or fix the budget so future checks cover it.</p><button type="button" class="mt8 btn" data-act="fixBudget">Fix the budget for future checks</button>`;
@@ -673,19 +690,19 @@
     const up = (x) => Math.ceil(x * 100 - 1e-6) / 100;
     const cut = up(short * f);                       // monthly amount to free up
     const food = (b.foodWeek || 0) * wpm;
-    const flexCats = S.cats.filter((c) => c.kind === 'flex' && c.id !== 'food' && (b.amounts[c.id] || 0) > 0);
+    const flexCats = [];
     const flex = sum(flexCats, (c) => b.amounts[c.id]);
     const savKeys = Object.keys(b.savings).filter((k) => (b.savings[k] || 0) > 0);
     const sav = sum(savKeys, (k) => b.savings[k]);
     const opts = [];
     const plan = (foodCut, flexCut, savCut) => {
       const ch = [];
-      if (foodCut > 0) { const nw = Math.max(0, C.round2(b.foodWeek - up(foodCut / wpm))); ch.push({ kind: 'food', label: 'Food and fun', from: b.foodWeek, to: nw, unit: 'a week' }); }
+      if (foodCut > 0) { const nw = Math.max(0, C.round2(b.foodWeek - up(foodCut / wpm))); ch.push({ kind: 'food', label: 'Weekly spending money', from: b.foodWeek, to: nw, unit: 'a week' }); }
       if (flexCut > 0) flexCats.forEach((c) => { const v = b.amounts[c.id]; ch.push({ kind: 'cat', id: c.id, label: catName(c.id), from: v, to: Math.max(0, C.round2(v - up(flexCut * v / flex))), unit: 'a month' }); });
       if (savCut > 0) savKeys.forEach((k) => { const v = b.savings[k]; ch.push({ kind: 'sav', id: k, label: 'Save to ' + (S.goals[k] ? S.goals[k].name : k), from: v, to: Math.max(0, C.round2(v - up(savCut * v / sav))), unit: 'a month' }); });
       return ch;
     };
-    if (food >= cut) opts.push({ t: 'Spend less on food and fun', ch: plan(cut, 0, 0) });
+    if (food >= cut) opts.push({ t: 'Lower your weekly spending money', ch: plan(cut, 0, 0) });
     if (flex >= cut) opts.push({ t: 'Trim shopping and other', ch: plan(0, cut, 0) });
     if (sav >= cut) opts.push({ t: 'Save a little less', ch: plan(0, 0, cut) });
     const tot = food + flex + sav;
@@ -857,9 +874,9 @@
         `<label class="f">I pay my cards off from</label><select name="src"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select>` +
         `<label class="mt check"><input type="checkbox" name="auto" ${S.autoBal ? 'checked' : ''}>Update balances when I log purchases</label><p class="muted small">Recommended. A purchase on a card adds to what it owes, so the app can warn you before ${payType() === 'savings' ? 'savings' : 'checking'} runs short.</p>`;
     } else if (step === 'budget') {
-      body = `<p class="muted">${me ? 'Your numbers are filled in. Fix anything that changed.' : 'Monthly amounts. Leave 0 for anything you do not spend on.'}</p><label class="f">Food and fun per week</label>${mIn('fw', b.foodWeek)}<label class="check"><input type="checkbox" name="roll" ${S.rollover ? 'checked' : ''}>Roll unspent food and fun into next week</label>` +
-        S.cats.filter((c) => c.id !== 'other' && c.id !== 'food').map((c) => `<label class="f">${esc(c.name)}, per month</label>${mIn('c_' + c.id, b.amounts[c.id])}`).join('') +
-        `<label class="f">Food and fun, per month</label>${mIn('c_food', b.amounts.food)}<p class="muted small">The weekly limit above is what the app tracks day to day.</p>`;
+      body = `<p class="muted">${me ? 'Your numbers are filled in. Fix anything that changed.' : 'Leave 0 for anything you do not pay.'}</p><label class="f">Weekly spending money</label>${mIn('fw', b.foodWeek)}<p class="muted small">One limit for food, shopping, and anything else that is not a bill.</p><label class="check"><input type="checkbox" name="roll" ${S.rollover ? 'checked' : ''}>Roll unspent money into next week</label><p class="label mt">Monthly bills and fixed costs</p>` +
+        S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label>${mIn('c_' + c.id, b.amounts[c.id])}`).join('');
+
     } else if (step === 'bills') {
       body = `<p class="muted">Due days let the app warn you, plan each paycheck, and put bills on your calendar.</p>` + S.bills.map((x) => `<div class="card inset"><label class="f">Name</label><input type="text" name="bn_${x.id}" value="${esc(x.name)}" autocomplete="off"><div class="two"><div><label class="f">Amount</label>${mIn('ba_' + x.id, x.amount)}</div><div><label class="f">Due day</label><input type="number" min="1" max="31" name="bd_${x.id}" value="${x.day || ''}" placeholder="1 to 31"></div></div><label class="f">Category</label><select name="bc_${x.id}">${S.cats.map((c) => `<option value="${c.id}" ${x.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><button type="button" class="mt8 btn small danger" data-act="wizRmBill" data-id="${x.id}">Remove bill</button></div>`).join('') +
         `<button type="button" class="btn" data-act="wizAddBill">Add a bill</button><p class="muted small mt8">Put streaming, apps, and memberships under Subscriptions so the app can check on them. If a category budget is lower than its bills, it gets raised to cover them.</p>`;
@@ -1194,14 +1211,14 @@
       ui.fixOpts = o.opts;
       openSheet(`<h2>Fix the budget</h2><p class="muted">This check is ${fm(-p.left)} short. To cover it every payday, your ${S.mode === 'school' ? 'School year' : 'Summer'} plan needs ${fm(o.cut)} less a month. Pick one:</p>` +
         (o.opts.length ? o.opts.map((x, i) => card(x.t, x.ch.map((c) => `<div class="row item"><span>${esc(c.label)}</span><b>${fm(c.from)} to ${fm(c.to)} <span class="muted small">${c.unit}</span></b></div>`).join('') + `<button class="mt8 btn primary" data-act="fixApply" data-i="${i}">Use this</button>`, 'inset')).join('')
-          : '<p class="r">There is not enough in food and fun, shopping, and savings to cover it. Lower a fixed bill in Budget and income, or check your take home amount.</p>') +
+          : '<p class="r">There is not enough in spending money and savings to cover it. Lower a fixed bill in Budget and income, or check your take home amount.</p>') +
         `<button class="mt btn" data-act="fixKeep">Leave the budget, this check was just low</button>`);
     },
     fixApply(d) {
       const x = ui.fixOpts && ui.fixOpts[+d.i]; if (!x) return;
       const b = budgetOf(), wpm = 52 / 12;
       x.ch.forEach((c) => {
-        if (c.kind === 'food') { b.foodWeek = c.to; b.amounts.food = C.round2(c.to * wpm); }
+        if (c.kind === 'food') b.foodWeek = c.to;
         else if (c.kind === 'cat') b.amounts[c.id] = c.to;
         else b.savings[c.id] = c.to;
       });
@@ -1425,6 +1442,7 @@
     if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
     applyBudgetNov2026();
     removeDadPayment();
+    poolSpending();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
@@ -1446,6 +1464,14 @@
     if (!S.expenses.some((e) => e.cat === 'dad')) S.cats = S.cats.filter((c) => c.id !== 'dad');
     S.noDadPay = true; save();
     setTimeout(() => toast("Dad's payment removed: budget is $806.65 a month"), 700);
+  }
+  // One time: food, shopping, and other share one weekly limit instead of separate monthly amounts.
+  function poolSpending() {
+    if (S.poolSpend) return;
+    ['school', 'summer'].forEach((m) => { S.cats.forEach((c) => { if (c.kind === 'flex') S.budget[m].amounts[c.id] = 0; }); if (S.persona !== 'blank') S.budget[m].foodWeek = 60; });
+    if (S.persona !== 'blank') { const f = S.cats.find((c) => c.id === 'food'); if (f && f.name === 'Food and fun') f.name = 'Food'; }
+    S.poolSpend = true; save();
+    setTimeout(() => toast('$60 a week now covers all your spending'), 800);
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
