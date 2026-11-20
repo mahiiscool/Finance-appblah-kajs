@@ -1374,8 +1374,19 @@
   function startSession() {
     fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null;
     if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
+    applyBudgetNov2026();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
+  }
+  // One time update to Mahi's budget (November 2026). Only budget numbers change; all logged data stays.
+  function applyBudgetNov2026() {
+    if (S.persona === 'blank' || S.budgetNov2026) return;
+    const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 240, amazon: 0 };
+    ['school', 'summer'].forEach((m) => { Object.assign(S.budget[m].amounts, amounts); S.budget[m].foodWeek = 60; });
+    const bills = { Windscribe: 2, 'Google Photos': 2, Spotify: 12.99, 'Snapchat Premium': 5, Claude: 20, Phone: 54, Gym: 25, 'Flex pay': 53.66, 'Car insurance fund': 200 };
+    S.bills.forEach((b) => { if (bills[b.name] !== undefined) b.amount = bills[b.name]; });
+    S.budgetNov2026 = true; save();
+    setTimeout(() => toast('Budget updated: $943.47 a month'), 600);
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
