@@ -216,8 +216,8 @@
       h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="btn" style="margin-top:10px" data-act="dismissSun">Dismiss</button>`, 'note');
     }
     const lb = S.lastBackup;
-    if (S.expenses.length && (!lb || C.daysBetween(lb, t) >= 7)) {
-      h += card('Backup', `<p>${lb ? 'It has been ' + C.daysBetween(lb, t) + ' days since your last backup.' : 'You have not backed up yet.'}</p><button class="btn" style="margin-top:10px" data-act="exportBackup">Back up now</button>`);
+    if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
+      h += card('Back up your data', `<p class="med">${lb ? 'It has been ' + C.daysBetween(lb, t) + ' days since your last backup.' : 'You have not backed up yet.'}</p><p class="muted small">Your data only lives on this phone. If Safari clears it or you lose the phone, a backup is the only way to get it back. Save the file to iCloud Drive.</p><div class="btns"><button class="btn" data-act="dismissBackup">Tomorrow</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`, lb ? '' : 'warn');
     }
     if (cardsOwed() > checking() && cardsOwed() > 0) {
       h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>Checking has ${fm(checking())}. You are short ${fm(cardsOwed() - checking())} before autopay.</p>`, 'warn');
@@ -357,7 +357,7 @@
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
     const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Theme, text size, security and backup'], ['bank', 'Automatic bank connection']];
-    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`);
+    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="quickSetup">Run quick setup again</button>');
   }
 
   function BillsView() {
@@ -563,6 +563,19 @@
   }
   function closeSheet() { $('#sheet').innerHTML = ''; }
 
+  // ---------- quick setup ----------
+  function setupStart() {
+    openSheet(`<h2>Quick setup</h2><p class="muted">Who is this app for?</p><div class="col"><button class="btn primary" data-act="setupMahi">I am Mahi</button><button class="btn" data-act="setupNew">Someone new, start blank</button><button class="btn" data-act="setupSkip">Skip for now</button></div><p class="muted small mt">Mahi gets the budget and bills that are already filled in. Someone new gets a clean slate and fills in their own numbers. This takes about a minute.</p>`);
+  }
+  function setupForm() {
+    const b = S.budget.school, me = mahi();
+    const cats = me ? '' : '<p class="label mt">Monthly budget by category</p><p class="muted small">Leave at 0 for anything you do not spend on.</p>' + S.cats.filter((c) => c.id !== 'other').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" name="c_${c.id}" value="${b.amounts[c.id] || 0}">`).join('');
+    openSheet(`<h2>${me ? 'Check your numbers' : 'Your numbers'}</h2><p class="muted">${me ? 'Your budget and bills are already filled in. Just confirm these three.' : 'Enter what you know. You can change everything later in More.'}</p><form data-form="quicksetup"><label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" name="inc" value="${b.income || ''}" placeholder="0"><label class="f">Checking balance right now</label><input type="text" inputmode="decimal" name="bal" value="${(S.accounts[0] && S.accounts[0].balance) || ''}" placeholder="0"><label class="f">Food and fun per week</label><input type="text" inputmode="decimal" name="fw" value="${b.foodWeek || ''}" placeholder="0">${cats}<div class="btns"><button class="btn" type="button" data-act="setupSkip">Skip</button><button class="btn primary" type="submit">Finish</button></div></form>`);
+  }
+  function setupDone() {
+    openSheet(`<h2>You are set</h2><p class="med">Log purchases as you make them.</p><p class="muted">Your data only lives on this phone, so the app will remind you to back it up every week. Make your first backup now and save it to iCloud Drive.</p><div class="btns"><button class="btn" data-act="closeSheet">Later</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`);
+  }
+
   function addSheet(id) {
     const e = id ? S.expenses.find((x) => x.id === id) : null;
     const cat = e ? e.cat : ui.lastCat, acct = e ? e.account : S.lastAccount;
@@ -661,6 +674,17 @@
       S.csvMap = im.map; save(); csvToReview(); render();
     },
     afford(fd, form) { /* live only */ },
+    quicksetup(fd) {
+      const b = S.budget.school, s2 = S.budget.summer;
+      b.income = C.num(fd.get('inc')); b.foodWeek = C.num(fd.get('fw')); s2.foodWeek = b.foodWeek;
+      if (S.accounts[0]) S.accounts[0].balance = C.num(fd.get('bal'));
+      if (!mahi()) S.cats.forEach((c) => {
+        if (c.id === 'other') return;
+        const v = fd.get('c_' + c.id); if (v === null) return;
+        b.amounts[c.id] = C.num(v); s2.amounts[c.id] = C.num(v);
+      });
+      S.setupDone = true; save(); closeSheet(); render(); setupDone();
+    },
     async setup(fd) {
       const p = fd.get('p') || '', p2 = fd.get('p2') || '', err = $('#lockerr');
       if (!/^\d{6}$/.test(p)) { err.textContent = 'Use exactly 6 digits'; return; }
@@ -719,6 +743,14 @@
     moreHist() { ui.hist += 40; render(); },
     sundayWeek() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = -1; render(); },
     sundayIous() { ui.tab = 'ious'; render(); },
+    setupMahi() { setupForm(); },
+    setupNew() {
+      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup });
+      save(); setupForm();
+    },
+    setupSkip() { S.setupDone = true; save(); closeSheet(); render(); },
+    quickSetup() { setupStart(); },
+    dismissBackup() { S.dismissed['bk' + C.today()] = true; save(); render(); },
     dismissSun() { S.dismissed['sun' + C.today()] = true; save(); render(); },
     openMore(d) { ui.tab = 'more'; ui.more = d.v; ui.imp = null; render(); window.scrollTo(0, 0); if (d.v === 'security') fillFaceBox(); if (d.v === 'afford') setTimeout(() => { const p = $('input[name=price]'); if (p) p.focus(); }, 50); },
     moreBack() { ui.more = null; ui.imp = null; render(); },
@@ -886,7 +918,10 @@
     try { const st = await V.unlockFace(); S = Object.assign(defaultState(), st || {}); startSession(); }
     catch (e) { const err = $('#lockerr'); if (err) err.textContent = 'Face ID did not work. Use your passcode.'; }
   };
-  function startSession() { fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null; render(); }
+  function startSession() {
+    fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null; render();
+    if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
+  }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
   }
