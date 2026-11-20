@@ -184,7 +184,7 @@
     return `<div class="ringwrap"><svg class="ringsvg" viewBox="0 0 210 210"><circle class="rtrack" cx="105" cy="105" r="${r}"/><circle class="rfill ${cls}" cx="105" cy="105" r="${r}" stroke-dasharray="${(c * p).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 105 105)"/></svg><div class="ringtext"><div class="big">${big}</div><div class="muted small">${small}</div></div></div>`;
   }
   const card = (label, inner, cls) => `<div class="card ${cls || ''}">${label ? `<p class="label">${label}</p>` : ''}${inner}</div>`;
-  const monthNav = (mk, act) => `<div class="row" style="margin-bottom:14px"><button class="btn small" data-act="${act}" data-d="-1">Previous</button><div class="med" style="margin:0">${C.monthName(mk)}</div><button class="btn small" data-act="${act}" data-d="1">Next</button></div>`;
+  const monthNav = (mk, act) => `<div class="mb14 row"><button class="btn small" data-act="${act}" data-d="-1">Previous</button><div class="m0 med tc f1 navt">${C.monthName(mk)}</div><button class="btn small" data-act="${act}" data-d="1">Next</button></div>`;
   const back = () => '<button class="back" data-act="moreBack">Back</button>';
 
   // ---------- render ----------
@@ -199,10 +199,9 @@
       case 'goals': body = Goals(); break;
       default: body = More();
     }
-    const tabs = [['home', 'Home', ICON.home], ['budget', 'Budget', ICON.chart], ['ious', 'IOUs', ICON.people], ['goals', 'Goals', ICON.target], ['more', 'More', ICON.more]];
+    const tabs = [['home', 'Home', ICON.home], ['budget', 'Budget', ICON.chart], ['add'], ['ious', 'IOUs', ICON.people], ['goals', 'Goals', ICON.target], ['more', 'More', ICON.more]];
     $('#app').innerHTML = `<div class="screen">${body}</div>` +
-      ((ui.tab === 'home' || ui.tab === 'budget') && !ui.more ? '<button class="fab" data-act="add">+ Add</button>' : '') +
-      `<nav class="tabbar">${tabs.map((t) => `<button class="${ui.tab === t[0] ? 'on' : ''}" data-act="tab" data-t="${t[0]}">${t[2]}<span>${t[1]}</span></button>`).join('')}</nav>`;
+      `<nav class="tabbar">${tabs.map((t) => t[0] === 'add' ? '<button class="addtab" data-act="add" aria-label="Add expense"><span class="plus">+</span><span>Add</span></button>' : `<button class="${ui.tab === t[0] ? 'on' : ''}" data-act="tab" data-t="${t[0]}">${t[2]}<span>${t[1]}</span></button>`).join('')}</nav>`;
     applyWidths();
     window.scrollTo(0, y);
   }
@@ -216,7 +215,7 @@
 
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
-      h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="btn" style="margin-top:10px" data-act="dismissSun">Dismiss</button>`, 'note');
+      h += card('Sunday review', `<p class="med">Review the week and settle up</p><p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
     }
     const lb = S.lastBackup;
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
@@ -234,14 +233,14 @@
     h += card('Month status', `<p class="big">${fm(spent)} <span class="muted med">of ${fm(plan)}</span></p>${bar(plan ? spent / plan : 0, C.status(plan ? spent / plan : 0))}<p class="muted">${over ? over + ' categor' + (over === 1 ? 'y is' : 'ies are') + ' over budget.' : 'Nothing is over budget.'}</p>`);
 
     const saved = savedInMonth(mk), sp2 = plannedSavings();
-    h += card('Savings this month', `<p class="big g">${fm(saved)} <span class="muted med">of ${fm(sp2)}</span></p>${bar(sp2 ? saved / sp2 : 0, 'b')}<p class="muted small">Bonus this month: ${fm(bonusInMonth(mk))}. Bonus money goes straight to savings and is never income.</p><button class="btn" style="margin-top:8px" data-act="logBonus">Log bonus</button>`);
+    h += card('Savings this month', `<p class="big g">${fm(saved)} <span class="muted med">of ${fm(sp2)}</span></p>${bar(sp2 ? saved / sp2 : 0, 'b')}<p class="muted small">Bonus this month: ${fm(bonusInMonth(mk))}. Bonus money goes straight to savings and is never income.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`);
 
     const owed = S.ious.filter((i) => !i.settled && i.dir === 'owedToMe');
     const od = owed.filter((i) => C.daysBetween(i.date, t) > 14).length;
     h += card('Owed to me', `<p class="big">${fm(sum(owed, remaining))}</p><p class="${od ? 'r' : 'muted'}">${od ? od + ' unpaid for over 14 days' : owed.length + ' open'}</p>`);
 
     const nb = nextBill();
-    h += card('Next bill due', nb ? `<p class="med ${nb.overdue ? 'r' : ''}">${esc(nb.b.name)}, ${fm(nb.b.amount)}</p><p class="muted">${nb.overdue ? 'Overdue since ' : 'Due '}${C.shortDate(nb.date)}</p>` : '<p class="muted">Set due days in Recurring bills to see this.</p><button class="btn" style="margin-top:10px" data-act="openMore" data-v="bills">Recurring bills</button>');
+    h += card('Next bill due', nb ? `<p class="med ${nb.overdue ? 'r' : ''}">${esc(nb.b.name)}, ${fm(nb.b.amount)}</p><p class="muted">${nb.overdue ? 'Overdue since ' : 'Due '}${C.shortDate(nb.date)}</p>` : '<p class="muted">Set due days in Recurring bills to see this.</p><button class="mt btn" data-act="openMore" data-v="bills">Recurring bills</button>');
 
     const st = takeoutStreak();
     h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food and fun purchase.' : 'No food and fun logged yet.'}</p>`);
@@ -260,13 +259,13 @@
   function WeekView() {
     const ws = C.weekStart(C.addDays(C.today(), ui.wOff * 7)), we = C.addDays(ws, 6), b = budgetOf();
     const sp = weekSpend(ws), fw = b.foodWeek, left = fw - sp, pct = fw ? sp / fw : 0;
-    let h = `<div class="row" style="margin-bottom:14px"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="muted" style="text-align:center">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
+    let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
     const sub = ui.wOff === 0 ? `${daysToSunday()} days until Sunday` : (left < 0 ? 'over' : 'left');
     h += card('Food and fun', ring(pct, C.status(pct), fm(left), left < 0 ? 'over budget' : 'left') +
-      `<p style="text-align:center" class="muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` +
-      (ui.wOff === 0 && left > 0 ? `<p style="text-align:center" class="muted small">About ${fm(left / daysToSunday())} a day to stay on track.</p>` : ''));
+      `<p class="tc muted">${fm(sp)} spent of ${fm(fw)}. ${sub}.</p>` +
+      (ui.wOff === 0 && left > 0 ? `<p class="tc muted small">About ${fm(left / daysToSunday())} a day to stay on track.</p>` : ''));
     const list = S.expenses.filter((e) => counted(e) && e.cat === 'food' && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
-    h += card('This week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
+    h += card('Food and fun this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
     return h;
   }
   function MonthView() {
@@ -285,7 +284,7 @@
   }
   function expRow(e) {
     const tags = (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '');
-    return `<div class="item" data-act="editExp" data-id="${e.id}" style="cursor:pointer"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span><b>${fm(e.amount)}</b></div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
+    return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span><b>${fm(e.amount)}</b></div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
   }
   function HistView() {
     const list = S.expenses.slice().sort((a, c) => (a.date < c.date ? 1 : a.date > c.date ? -1 : 0));
@@ -299,7 +298,7 @@
   function IOUs() {
     const t = C.today();
     let h = `<div class="head"><h1 class="title">IOUs</h1></div><div class="sub">Who owes what</div>`;
-    h += `<button class="btn primary" style="margin-bottom:16px" data-act="addIou">Add an IOU</button>`;
+    h += `<button class="mb16 btn primary" data-act="addIou">Add an IOU</button>`;
     const open = S.ious.filter((i) => !i.settled);
     const net = {};
     open.forEach((i) => { const k = i.person.trim().toLowerCase(); net[k] = net[k] || { name: i.person.trim(), v: 0 }; net[k].v += i.dir === 'owedToMe' ? remaining(i) : -remaining(i); });
@@ -309,7 +308,7 @@
       const items = open.filter((i) => i.dir === dir).sort((a, c) => (a.date < c.date ? -1 : 1));
       return card(title, items.length ? items.map((i) => {
         const age = C.daysBetween(i.date, t), late = age > 14;
-        return `<div class="item"><div class="row"><span class="t ${late ? 'r' : ''}">${esc(i.person)}</span><b class="${late ? 'r' : ''}">${fm(remaining(i))}</b></div><div class="muted small">${esc(i.reason || 'No reason')}, ${C.shortDate(i.date)}${late ? `<span class="pill r">${age} days unpaid</span>` : ''}${i.payments.length ? `<span class="pill g">Paid ${fm(sum(i.payments, (p) => p.amount))} of ${fm(i.amount)}</span>` : ''}</div><div class="btns"><button class="btn small" data-act="payIou" data-id="${i.id}">Partial payment</button><button class="btn small" data-act="settleIou" data-id="${i.id}">Settle</button><button class="btn small danger" data-act="delIou" data-id="${i.id}">Delete</button></div></div>`;
+        return `<div class="item"><div class="row"><span class="t ${late ? 'r' : ''}">${esc(i.person)}</span><b class="${late ? 'r' : ''}">${fm(remaining(i))}</b></div><div class="muted small">${esc(i.reason || 'No reason')}, ${C.shortDate(i.date)}${late ? `<span class="pill r">${age} days unpaid</span>` : ''}${i.payments.length ? `<span class="pill g">Paid ${fm(sum(i.payments, (p) => p.amount))} of ${fm(i.amount)}</span>` : ''}</div><div class="btns"><button class="btn small" data-act="payIou" data-id="${i.id}">Payment</button><button class="btn small" data-act="settleIou" data-id="${i.id}">Settle</button><button class="btn small danger" data-act="delIou" data-id="${i.id}">Delete</button></div></div>`;
       }).join('') : '<p class="muted">Nothing here.</p>');
     };
     h += list('owedToMe', 'They owe me') + list('iOwe', 'I owe them');
@@ -322,7 +321,7 @@
   function Goals() {
     const t = C.today(), b = budgetOf();
     let h = `<div class="head"><h1 class="title">Goals</h1></div><div class="sub">Savings and payback</div>`;
-    h += `<button class="btn primary" style="margin-bottom:16px" data-act="logBonus">Log bonus</button>`;
+    h += `<button class="mb16 btn primary" data-act="logBonus">Log bonus</button>`;
     // mom
     const mom = S.goals.mom, momTot = goalTotal('mom'), momLeft = Math.max(0, mom.target - momTot), momMonthly = b.savings.mom || 0;
     h += goalCard('mom', mom.target ? `<p class="big">${fm(momLeft)} <span class="muted med">left of ${fm(mom.target)}</span></p>${bar(mom.target ? momTot / mom.target : 0, 'g')}<p class="muted">${momLeft === 0 ? 'Paid off.' : momMonthly ? Math.ceil(momLeft / momMonthly) + ' months left at ' + fm(momMonthly) + ' a month.' : 'Set a monthly amount in Budget and income.'}</p>` : `<p class="muted">Enter the total you owe to see months left at ${fm(momMonthly)} a month.</p><p>Paid back so far: <b>${fm(momTot)}</b></p>`);
@@ -334,7 +333,7 @@
       if (dd < 0) insLine = `<p class="r">Due date was ${C.shortDate(ins.due)}.</p>`;
       else { const months = Math.max(1, dd / 30.44); insLine = `<p class="muted">Due ${C.shortDate(ins.due)}, ${dd} days away. ${need > 0 ? 'Needs about ' + fm(need / months) + ' a month.' : 'Fully funded.'}</p>`; }
     }
-    h += goalCard('ins', `<p class="big">${fm(insTot)} <span class="muted med">of ${fm(ins.target)}</span></p>${bar(ins.target ? insTot / ins.target : 0, C.status(0.5))}${insLine}<p class="muted small">Car insurance spending counts toward this.</p>${ins.due ? '<button class="btn" style="margin-top:8px" data-act="insNext">Bill paid, start next cycle</button>' : ''}`);
+    h += goalCard('ins', `<p class="big">${fm(insTot)} <span class="muted med">of ${fm(ins.target)}</span></p>${bar(ins.target ? insTot / ins.target : 0, C.status(0.5))}${insLine}<p class="muted small">Car insurance spending counts toward this.</p>${ins.due ? '<button class="mt8 btn" data-act="insNext">Bill paid, start next cycle</button>' : ''}`);
     // trip
     const trip = S.goals.trip, tripTot = goalTotal('trip');
     h += goalCard('trip', trip.target ? `<p class="big">${fm(tripTot)} <span class="muted med">of ${fm(trip.target)}</span></p>${bar(tripTot / trip.target, 'b')}` : `<p class="big">${fm(tripTot)}</p><p class="muted">Set a target in Edit if you want a progress bar.</p>`);
@@ -343,7 +342,7 @@
     return h;
   }
   function goalCard(k, inner) {
-    return card(S.goals[k].name, inner + `<div class="btns"><button class="btn small" data-act="contrib" data-k="${k}">Log contribution</button><button class="btn small" data-act="goalHist" data-k="${k}">History</button><button class="btn small" data-act="goalEdit" data-k="${k}">Edit</button></div>`);
+    return card(S.goals[k].name, inner + `<div class="btns"><button class="btn small" data-act="contrib" data-k="${k}">Add</button><button class="btn small" data-act="goalHist" data-k="${k}">History</button><button class="btn small" data-act="goalEdit" data-k="${k}">Edit</button></div>`);
   }
 
   // ---------- MORE ----------
@@ -359,7 +358,7 @@
     if (v === 'rules') return RulesView();
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
-    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Theme, text size, security and backup'], ['bank', 'Automatic bank connection']];
+    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Monthly recap'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
     return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="quickSetup">Run quick setup again</button>');
   }
 
@@ -368,7 +367,7 @@
     let h = back() + `<h1 class="title">Recurring bills</h1><div class="sub">Check a bill to count it as spent</div>` + monthNav(mk, 'bnav');
     h += card('Bills', S.bills.map((b) => {
       const paid = billPaid(b, mk), due = b.day ? dueDate(mk, b.day) : null, late = !paid && due && due < t;
-      return `<div class="item row"><label class="check" style="flex:1"><input type="checkbox" data-act="billPaid" data-id="${b.id}" ${paid ? 'checked' : ''}><span><span class="t ${late ? 'r' : ''}">${esc(b.name)}</span><br><span class="muted small">${fm(b.amount)}, ${due ? 'due ' + C.shortDate(due) : 'no due day set'}</span></span></label><button class="btn small" data-act="editBill" data-id="${b.id}">Edit</button></div>`;
+      return `<div class="item row"><label class="f1 check"><input type="checkbox" data-act="billPaid" data-id="${b.id}" ${paid ? 'checked' : ''}><span><span class="t ${late ? 'r' : ''}">${esc(b.name)}</span><br><span class="muted small">${fm(b.amount)}, ${due ? 'due ' + C.shortDate(due) : 'no due day set'}</span></span></label><button class="btn small" data-act="editBill" data-id="${b.id}">Edit</button></div>`;
     }).join('') || '<p class="muted">No bills yet.</p>');
     h += `<button class="btn primary" data-act="addBill">Add a bill</button>`;
     return h;
@@ -377,13 +376,13 @@
   function HouseholdView() {
     const items = S.household.items, total = sum(items, (i) => i.amount), t = C.monthKey(C.today());
     let h = back() + `<h1 class="title">${mahi() ? "Dad's bills" : 'Household bills'}</h1><div class="sub">Pass through only. Tag any charge as Household when you add it.</div>`;
-    h += card('Monthly bills', items.map((it, i) => `<div class="item"><div class="two row" style="gap:8px"><input type="text" data-path="household.items.${i}.name" data-t="s" value="${esc(it.name)}"><input type="text" inputmode="decimal" data-path="household.items.${i}.amount" data-t="n" data-re="1" value="${it.amount}" style="max-width:120px"></div><button class="btn small danger" style="margin-top:8px" data-act="delHh" data-i="${i}">Remove</button></div>`).join('') + `<div class="row" style="margin-top:12px"><b>Total</b><b>${fm(total)}</b></div><button class="btn" style="margin-top:10px" data-act="addHh">Add a bill</button>`);
+    h += card('Monthly bills', items.map((it, i) => `<div class="item"><div class="g8 two row"><input type="text" data-path="household.items.${i}.name" data-t="s" value="${esc(it.name)}"><input class="w120" type="text" inputmode="decimal" data-path="household.items.${i}.amount" data-t="n" data-re="1" value="${it.amount}"></div><button class="mt8 btn small danger" data-act="delHh" data-i="${i}">Remove</button></div>`).join('') + `<div class="mt12 row"><b>Total</b><b>${fm(total)}</b></div><button class="mt btn" data-act="addHh">Add a bill</button>`);
     const months = [0, 1, 2, 3, 4, 5].map((n) => C.shiftMonthKey(t, -n));
     h += card(mahi() ? "Dad's deposit by month" : 'Deposit received by month', months.map((mk) => {
       const dep = S.household.deposits[mk];
       let st = '<span class="pill">No deposit logged</span>';
       if (dep > 0) st = dep + 0.004 >= total ? '<span class="pill g">Covered</span>' : `<span class="pill r">Short ${fm(total - dep)}</span>`;
-      return `<div class="item"><div class="row"><span class="t">${C.monthName(mk)}</span>${st}</div><input type="text" inputmode="decimal" placeholder="Deposit amount" data-path="household.deposits.${mk}" data-t="n" data-re="1" value="${dep || ''}" style="margin-top:8px"></div>`;
+      return `<div class="item"><div class="row"><span class="t">${C.monthName(mk)}</span>${st}</div><input class="mt8" type="text" inputmode="decimal" placeholder="Deposit amount" data-path="household.deposits.${mk}" data-t="n" data-re="1" value="${dep || ''}"></div>`;
     }).join(''));
     return h;
   }
@@ -394,7 +393,7 @@
     if (owed > chk && owed > 0) h += card('Warning', `<p class="med r">Cards owe ${fm(owed)}</p><p>${payName()} has ${fm(chk)}. You are short ${fm(owed - chk)} before you pay them off.</p>`, 'warn');
     else if (owed > 0) h += card('Payoff check', `<p class="med g">${payName()} covers your cards</p><p class="muted">${fm(chk - owed)} to spare after ${fm(owed)} in card balances.</p>`);
     h += card('Pay cards off from', `<select data-path="paySource" data-re="1"><option value="checking" ${payType() === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${payType() === 'savings' ? 'selected' : ''}>Savings</option></select>`);
-    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : a.type === 'savings' ? 'Savings' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}" style="margin-top:8px"></div>`).join(''));
+    h += card('Balances', S.accounts.map((a, i) => `<div class="item"><div class="row"><span class="t">${esc(a.name)}${a.last4 ? ' ending ' + esc(a.last4) : ''}<span class="pill">${a.type === 'card' ? 'Card' : a.type === 'savings' ? 'Savings' : 'Checking'}</span></span><button class="btn small" data-act="editAcct" data-id="${a.id}">Edit</button></div><input class="mt8" type="text" inputmode="decimal" placeholder="Balance" data-path="accounts.${i}.balance" data-t="n" data-re="1" value="${a.balance || ''}"></div>`).join(''));
     h += `<button class="btn primary" data-act="addAcct">Add a card or account</button>`;
     return h;
   }
@@ -457,25 +456,25 @@
   }
 
   function SecurityView() {
-    return back() + `<h1 class="title">Security and backup</h1><div class="sub">Your data never leaves this device</div>` +
+    return back() + `<h1 class="title">Settings</h1><div class="sub">Your data never leaves this device</div>` +
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
       card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
       card('Lock', V.isAuto() ? `<p class="muted">No lock is on. Anyone holding your unlocked phone can open this app.</p><div class="btns"><button class="btn primary" data-act="setPinNow">Set a PIN</button></div>` : `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><button class="btn mt" data-act="removePin">Remove PIN, no lock</button><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
-      card('Danger zone', '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p><button class="btn danger" style="margin-top:10px" data-act="erase">Erase all data</button>');
+      card('Danger zone', '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p><button class="mt btn danger" data-act="erase">Erase all data</button>');
   }
   async function fillFaceBox() {
     const box = $('#facebox'); if (!box) return;
     if (V.isAuto()) { box.innerHTML = ''; return; }
     if (!(await V.faceSupported())) { box.innerHTML = ''; return; }
     const on = await V.faceEnabled();
-    box.innerHTML = `<button class="btn" style="margin-top:10px" data-act="${on ? 'faceOff' : 'faceOn'}">${on ? 'Turn off Face ID' : 'Turn on Face ID'}</button>`;
+    box.innerHTML = `<button class="mt btn" data-act="${on ? 'faceOff' : 'faceOn'}">${on ? 'Turn off Face ID' : 'Turn on Face ID'}</button>`;
   }
 
   function BankView() {
-    return back() + `<h1 class="title">Bank connection</h1><div class="sub">Not available yet</div>` + card('Why it is not here', '<p>Connecting a bank automatically would need a secure backend server and a service like Plaid to hold access tokens safely. This app has no server on purpose, so your data stays on your phone.</p><p class="muted">When you are ready, a small private backend can be added later. Until then, use manual entry, CSV import, or screenshot import.</p><button class="btn" disabled style="opacity:.5">Connect a bank</button>');
+    return back() + `<h1 class="title">Bank connection</h1><div class="sub">Not available yet</div>` + card('Why it is not here', '<p>Connecting a bank automatically would need a secure backend server and a service like Plaid to hold access tokens safely. This app has no server on purpose, so your data stays on your phone.</p><p class="muted">When you are ready, a small private backend can be added later. Until then, use manual entry, CSV import, or screenshot import.</p><button class="dim btn" disabled>Connect a bank</button>');
   }
 
   // ---------- IMPORT ----------
@@ -591,12 +590,12 @@
       <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional" value="${esc(e ? e.note : '')}">
       <label class="f">Card or account</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === acct ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash" ${acct === 'cash' ? 'selected' : ''}>Cash or other</option></select>
       <label class="f">Date</label><input type="date" name="date" value="${e ? e.date : C.today()}">
-      <label class="check" style="margin-top:10px"><input type="checkbox" name="forOther" data-toggle="personbox" ${e && e.forOther ? 'checked' : ''}>Bought for someone else</label>
+      <label class="mt check"><input type="checkbox" name="forOther" data-toggle="personbox" ${e && e.forOther ? 'checked' : ''}>Bought for someone else</label>
       <div id="personbox" ${e && e.forOther ? '' : 'hidden'}><input type="text" name="person" placeholder="Who owes you?" autocomplete="off" value="${esc(e ? e.forOther : '')}"></div>
       <label class="check"><input type="checkbox" name="oneTime" ${e && e.paidFromSavings ? 'checked' : ''}>One time, paid from savings</label>
       <label class="check"><input type="checkbox" name="household" ${e && e.household ? 'checked' : ''}>Household charge, ignore it</label>
       <div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>
-      ${e ? `<button class="btn danger" type="button" style="margin-top:10px" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
+      ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
     const a = $('#sheet input[name=amount]'); if (a && !e) setTimeout(() => a.focus(), 50);
   }
 
@@ -747,6 +746,7 @@
     async restore(fd) {
       try {
         S = Object.assign(defaultState(), await V.importBackup(ui.pendingBackup, fd.get('p') || ''));
+        setPinHint(!V.isAuto() && /^\d{6}$/.test(fd.get('p') || ''));
         ui.pendingBackup = null; closeSheet(); toast('Backup restored'); render();
       } catch (e) { toast(e.message || 'Could not restore'); }
     }
@@ -784,7 +784,7 @@
     },
     setupMahi() { setupForm(); },
     setupNew() {
-      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup });
+      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
       save(); setupForm();
     },
     setupSkip() { S.setupDone = true; save(); closeSheet(); render(); },
@@ -803,13 +803,14 @@
     },
     settleIou(d) {
       const i = S.ious.find((x) => x.id === d.id);
+      if (!confirm('Mark ' + i.person + ' as fully paid?')) return;
       const r = remaining(i); if (r > 0) i.payments.push({ date: C.today(), amount: r });
       i.settled = true; save(); render(); toast('Settled');
     },
     delIou(d) { if (confirm('Delete this IOU?')) { S.ious = S.ious.filter((x) => x.id !== d.id); save(); render(); } },
     // goals
     contrib(d) {
-      openSheet(`<h2>Log contribution</h2><p class="muted">${esc(S.goals[d.k].name)}</p><form data-form="contrib"><input type="hidden" name="k" value="${d.k}"><label class="f">Amount</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional"><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
+      openSheet(`<h2>Add money</h2><p class="muted">${esc(S.goals[d.k].name)}</p><form data-form="contrib"><input type="hidden" name="k" value="${d.k}"><label class="f">Amount</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional"><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
     },
     logBonus() {
       const gl = Object.keys(S.goals).map((k) => `<option value="${k}" ${k === (ui.bonusGoal || 'gen') ? 'selected' : ''}>${esc(S.goals[k].name)}</option>`).join('');
@@ -818,9 +819,9 @@
     },
     goalHist(d) {
       const g = S.goals[d.k], list = g.contribs.slice().sort((a, c) => (a.date < c.date ? 1 : -1));
-      openSheet(`<h2>${esc(g.name)}</h2>${list.length ? list.map((c) => `<div class="item row"><span>${C.shortDate(c.date)} ${esc(c.note)}<br><b>${fm(c.amount)}</b></span><button class="btn small danger" data-act="delContrib" data-k="${d.k}" data-id="${c.id}">Delete</button></div>`).join('') : '<p class="muted">No contributions yet.</p>'}<button class="btn" style="margin-top:14px" data-act="closeSheet">Close</button>`);
+      openSheet(`<h2>${esc(g.name)}</h2>${list.length ? list.map((c) => `<div class="item row"><span>${C.shortDate(c.date)} ${esc(c.note)}<br><b>${fm(c.amount)}</b></span><button class="btn small danger" data-act="delContrib" data-k="${d.k}" data-id="${c.id}">Delete</button></div>`).join('') : '<p class="muted">No contributions yet.</p>'}<button class="mt14 btn" data-act="closeSheet">Close</button>`);
     },
-    delContrib(d) { const g = S.goals[d.k]; g.contribs = g.contribs.filter((c) => c.id !== d.id); save(); closeSheet(); render(); },
+    delContrib(d) { if (!confirm('Delete this entry?')) return; const g = S.goals[d.k]; g.contribs = g.contribs.filter((c) => c.id !== d.id); save(); closeSheet(); render(); },
     goalEdit(d) {
       const g = S.goals[d.k], label = d.k === 'mom' ? 'Total you owe' : 'Target';
       openSheet(`<h2>Edit ${esc(g.name)}</h2><form data-form="goaledit"><input type="hidden" name="k" value="${d.k}"><label class="f">${label}</label><input type="text" inputmode="decimal" name="target" value="${g.target || ''}" autocomplete="off">${d.k === 'ins' ? `<label class="f">Bill due date</label><input type="date" name="due" value="${g.due || ''}">` : ''}<div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
@@ -838,12 +839,12 @@
     delBill(d) { S.bills = S.bills.filter((b) => b.id !== d.id); save(); closeSheet(); render(); },
     // household
     addHh() { S.household.items.push({ id: uid(), name: 'New bill', amount: 0 }); save(); render(); },
-    delHh(d) { S.household.items.splice(+d.i, 1); save(); render(); },
+    delHh(d) { if (!confirm('Remove this bill?')) return; S.household.items.splice(+d.i, 1); save(); render(); },
     // accounts
     addAcct() { acctSheet(); },
     editAcct(d) { acctSheet(d.id); },
     delAcct(d) { S.accounts = S.accounts.filter((a) => a.id !== d.id); save(); closeSheet(); render(); },
-    delRule(d) { S.rules.splice(+d.i, 1); save(); render(); },
+    delRule(d) { if (!confirm('Delete this rule?')) return; S.rules.splice(+d.i, 1); save(); render(); },
     // import
     pickCsv() { $('#csvfile').click(); },
     pickImg() { $('#imgfile').click(); },
@@ -864,7 +865,7 @@
       openSheet(`<h2>Change PIN</h2><form data-form="chpass"><label class="f">Current passcode or PIN</label><input type="password" name="o" autocomplete="current-password" required><label class="f">New 6 digit PIN</label><input type="password" name="n" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><label class="f">Repeat new PIN</label><input type="password" name="n2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Change</button></div></form>`);
     },
     faceOn() {
-      openSheet(`<h2>Turn on Face ID</h2><p class="muted">Enter your passcode once to link it.</p><form data-form="faceon"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Continue</button></div></form>`);
+      openSheet(`<h2>Turn on Face ID</h2><p class="muted">Enter your PIN once to link it.</p><form data-form="faceon"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Continue</button></div></form>`);
     },
     async faceOff() { await V.disableFace(); toast('Face ID is off'); fillFaceBox(); },
     async exportBackup() {
@@ -880,7 +881,7 @@
     pickBackup() { $('#bkfile').click(); },
     blankNow() {
       if (!confirm('Replace the preloaded budget, bills, goals, and rules with blank ones?')) return;
-      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup });
+      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, setupDone: S.setupDone, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
       save(); ui.more = null; ui.tab = 'home'; render(); toast('Blank setup ready. Set your budget in More.');
     },
     erase() {
@@ -892,11 +893,11 @@
 
   function billSheet(id) {
     const b = id ? S.bills.find((x) => x.id === id) : null;
-    openSheet(`<h2>${b ? 'Edit bill' : 'Add a bill'}</h2><form data-form="bill"><input type="hidden" name="id" value="${id || ''}"><label class="f">Name</label><input type="text" name="name" value="${esc(b ? b.name : '')}" required><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${b ? b.amount : ''}" required><label class="f">Due day of the month</label><input type="number" name="day" min="1" max="31" value="${b && b.day ? b.day : ''}" placeholder="1 to 31"><label class="f">Category</label><select name="cat">${S.cats.map((c) => `<option value="${c.id}" ${b && b.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${b ? `<button class="btn danger" type="button" style="margin-top:10px" data-act="delBill" data-id="${b.id}">Delete bill</button>` : ''}</form>`);
+    openSheet(`<h2>${b ? 'Edit bill' : 'Add a bill'}</h2><form data-form="bill"><input type="hidden" name="id" value="${id || ''}"><label class="f">Name</label><input type="text" name="name" value="${esc(b ? b.name : '')}" required><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${b ? b.amount : ''}" required><label class="f">Due day of the month</label><input type="number" name="day" min="1" max="31" value="${b && b.day ? b.day : ''}" placeholder="1 to 31"><label class="f">Category</label><select name="cat">${S.cats.map((c) => `<option value="${c.id}" ${b && b.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${b ? `<button class="mt btn danger" type="button" data-act="delBill" data-id="${b.id}">Delete bill</button>` : ''}</form>`);
   }
   function acctSheet(id) {
     const a = id ? S.accounts.find((x) => x.id === id) : null;
-    openSheet(`<h2>${a ? 'Edit account' : 'Add a card or account'}</h2><p class="muted">Nickname and last 4 digits only. Never enter full numbers.</p><form data-form="acct"><input type="hidden" name="id" value="${id || ''}"><label class="f">Nickname</label><input type="text" name="name" value="${esc(a ? a.name : '')}" required><label class="f">Last 4 digits</label><input type="text" name="last4" inputmode="numeric" maxlength="4" value="${esc(a ? a.last4 : '')}"><label class="f">Type</label><select name="type"><option value="card" ${a && a.type === 'card' ? 'selected' : ''}>Credit card</option><option value="checking" ${a && a.type === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${a && a.type === 'savings' ? 'selected' : ''}>Savings</option></select><label class="f">Balance</label><input type="text" inputmode="decimal" name="balance" value="${a ? a.balance || '' : ''}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${a && S.accounts.length > 1 ? `<button class="btn danger" type="button" style="margin-top:10px" data-act="delAcct" data-id="${a.id}">Delete</button>` : ''}</form>`);
+    openSheet(`<h2>${a ? 'Edit account' : 'Add a card or account'}</h2><p class="muted">Nickname and last 4 digits only. Never enter full numbers.</p><form data-form="acct"><input type="hidden" name="id" value="${id || ''}"><label class="f">Nickname</label><input type="text" name="name" value="${esc(a ? a.name : '')}" required><label class="f">Last 4 digits</label><input type="text" name="last4" inputmode="numeric" maxlength="4" value="${esc(a ? a.last4 : '')}"><label class="f">Type</label><select name="type"><option value="card" ${a && a.type === 'card' ? 'selected' : ''}>Credit card</option><option value="checking" ${a && a.type === 'checking' ? 'selected' : ''}>Checking</option><option value="savings" ${a && a.type === 'savings' ? 'selected' : ''}>Savings</option></select><label class="f">Balance</label><input type="text" inputmode="decimal" name="balance" value="${a ? a.balance || '' : ''}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${a && S.accounts.length > 1 ? `<button class="mt btn danger" type="button" data-act="delAcct" data-id="${a.id}">Delete</button>` : ''}</form>`);
   }
 
   // ---------- events ----------
@@ -915,6 +916,15 @@
     const f = ev.target.closest('form[data-live=afford]');
     if (f) { const fd = new FormData(f); $('#affout').innerHTML = affordHTML(C.num(fd.get('price')), fd.get('cat')); applyWidths(); }
   });
+  // Redraw only when no form box on the page has focus, so tapping from one box
+  // to the next does not close the keyboard.
+  let pendingRender = false;
+  function renderWhenIdle() {
+    const a = document.activeElement;
+    if (a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('.screen')) { pendingRender = true; return; }
+    pendingRender = false; render();
+  }
+  document.addEventListener('focusout', () => { if (pendingRender) setTimeout(renderWhenIdle, 0); });
   function setPath(path, val) {
     const p = path.split('.'); let o = S;
     for (let i = 0; i < p.length - 1; i++) o = o[p[i]];
@@ -924,7 +934,8 @@
     const el = ev.target;
     if (el.dataset && el.dataset.path) {
       setPath(el.dataset.path, el.dataset.t === 'n' ? C.round2(C.num(el.value)) : el.value);
-      save(); if (el.dataset.re) { const active = el.dataset.path; render(); }
+      save();
+      if (el.dataset.re) { if (el.tagName === 'SELECT') render(); else setTimeout(renderWhenIdle, 0); }
       return;
     }
     if (el.dataset && el.dataset.toggle) { const box = $('#' + el.dataset.toggle); if (box) box.hidden = !el.checked; return; }
@@ -951,7 +962,7 @@
       }
       const face = exists && (await V.faceEnabled());
       const pin = exists && getPinHint();
-      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="btn" name="persona" value="blank" type="submit" style="margin-top:10px">I\'m not Mahi</button><p class="muted small" style="margin-top:12px">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="btn" style="margin-top:12px" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
+      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="mt btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="mt btn" name="persona" value="blank" type="submit">I\'m not Mahi</button><p class="mt12 muted small">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="mt12 btn" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
       const p = $('input[name=p]'); if (p) setTimeout(() => p.focus(), 50);
       if (face && !forceUnlock) { /* user taps the button to start Face ID */ }
     });
@@ -986,7 +997,7 @@
     }
   });
   function getScale() { try { const v = parseFloat(localStorage.getItem('moneyui')); return v >= 0.7 && v <= 1.3 ? v : 1; } catch (e) { return 1; } }
-  function applyScale(v) { document.documentElement.style.zoom = v === 1 ? '' : String(v); }
+  function applyScale(v) { const h = document.documentElement; h.style.zoom = v === 1 ? '' : String(v); h.style.setProperty('--z', String(v)); }
   function setScale(v) { try { localStorage.setItem('moneyui', String(v)); } catch (e) {} applyScale(v); }
   document.addEventListener('input', (ev) => {
     if (ev.target.id !== 'uiscale') return;
