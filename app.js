@@ -1588,6 +1588,10 @@
     momStrict();
     overCarryOn();
     LO();
+    try {
+      const up = sessionStorage.getItem('moneyUpdated');
+      if (up) { sessionStorage.removeItem('moneyUpdated'); const u = JSON.parse(up); ui.tab = u.tab || 'home'; ui.more = u.more || null; setTimeout(() => { toast('Updated to the newest version'); if (ui.more === 'security') fillFaceBox(); }, 400); }
+    } catch (e) {}
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
   }
@@ -1686,15 +1690,31 @@
     const cs = document.querySelector('meta[name=color-scheme]'); if (cs) cs.setAttribute('content', t === 'auto' ? 'dark light' : light ? 'light' : 'dark');
     const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', BARS[t] || (matchMedia('(prefers-color-scheme: light)').matches ? '#eef2fa' : '#0a1120'));
   }
-  actions.updateApp = async () => {
-    toast('Updating');
+  // Checks GitHub for a newer version. Only reloads when there really is one, then reopens Settings after unlock.
+  let updating = false;
+  actions.updateApp = async (d, el) => {
+    if (updating) return;
+    updating = true;
+    const btn = el && el.closest ? el.closest('button') : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking'; }
+    const done = (msg) => { updating = false; if (btn) { btn.disabled = false; btn.textContent = 'Check for updates'; } if (msg) toast(msg); };
     try {
       await flush();
-      const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
-      await Promise.all(regs.map((r) => r.unregister()));
-      const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k)));
-    } catch (e) {}
-    location.reload();
+      if (!('serviceWorker' in navigator)) return done('Updates need Safari on iPhone');
+      let reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) reg = await navigator.serviceWorker.register('sw.js');
+      await reg.update();
+      const nw = reg.installing || reg.waiting;
+      if (!nw) return done('You have the newest version');
+      if (btn) btn.textContent = 'Downloading';
+      await new Promise((res) => {
+        const t = setTimeout(res, 15000);
+        const ok = () => { if (nw.state === 'activated' || nw.state === 'redundant') { clearTimeout(t); res(); } };
+        nw.addEventListener('statechange', ok); ok();
+      });
+      try { sessionStorage.setItem('moneyUpdated', JSON.stringify({ tab: ui.tab, more: ui.more })); } catch (e) {}
+      location.reload();
+    } catch (e) { done('Could not check right now. Try again with internet.'); }
   };
   actions.setTheme = (d) => { try { localStorage.setItem('moneytheme', d.v); } catch (e) {} applyTheme(d.v); render(); };
   applyTheme(getTheme());
