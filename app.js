@@ -79,7 +79,7 @@
         { match: 'shell', cat: 'gas' }, { match: 'costco gas', cat: 'gas' }
       ],
       paySource: 'checking', csvMap: null, lastBackup: null, lastAccount: 'chk', dismissed: {},
-      autoBal: true, balSince: null, rollover: false, rollSince: null, payFreq: 'biweekly', paychecks: [], transfers: [], setupV: 0
+      autoBal: true, balSince: null, rollover: false, rollSince: null, overCarry: true, overSince: null, payFreq: 'biweekly', paychecks: [], transfers: [], setupV: 0
     };
   }
 
@@ -135,7 +135,7 @@
   const poolMonth = (m) => C.round2((budgetOf(m).foodWeek || 0) * 52 / 12);
   // The weekly spending money card, used on Home and in Budget > Week.
   function weekHero(ws, isNow) {
-    const b = budgetOf(), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw ? sp / fw : 0;
+    const b = budgetOf(), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw > 0 ? sp / fw : (fw < 0 || sp > 0 ? 1 : 0);
     const t = C.today(), days = daysToSunday();
     const today = sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date === t), (e) => e.amount);
     let h = ring(pct, C.status(pct), fm(left), left < 0 ? 'over' : 'left this week');
@@ -144,6 +144,7 @@
       h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent. Today: ${fm(today)}.</p>`;
     } else h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent, ${C.shortDate(ws)} to ${C.shortDate(we)}.</p>`;
     if (fw > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>`;
+    else if (fw < b.foodWeek) h += `<p class="tc small y">${fm(b.foodWeek - fw)} taken out to cover overspending from earlier weeks.</p>`;
     return h;
   }
   // ---------- money left over each month goes to savings ----------
@@ -281,14 +282,21 @@
   const FREQS = [['weekly', 'Every week'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Once a month']];
   const payFreq = () => (S.mode === 'summer' ? S.budget.summer.freq : S.payFreq) || 'biweekly';
   const perCheck = () => (S.mode === 'summer' ? S.budget.summer.pay || 0 : C.round2(incomeOf('school') / PER_MONTH[payFreq()]));
-  // Weekly spending money limit, plus anything left over from earlier weeks when rollover is on.
+  // Weekly spending money limit. Unspent money carries forward when rollover is on (up to one week's worth),
+  // and overspending carries forward as a smaller limit next week when overspend carry is on.
   function weekLimit(ws) {
     const base = budgetOf().foodWeek || 0;
-    if (!S.rollover || !S.rollSince || !base) return base;
-    let w = C.weekStart(S.rollSince); const early = C.addDays(ws, -84); if (w < early) w = early;
+    const rs = S.rollover && S.rollSince ? C.weekStart(S.rollSince) : null;
+    const os = S.overCarry && S.overSince ? C.weekStart(S.overSince) : null;
+    if (!base || (!rs && !os)) return base;
+    let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
     let carry = 0;
-    for (; w < ws; w = C.addDays(w, 7)) carry = Math.min(base, Math.max(0, base + carry - weekSpend(w)));
-    return base + carry;
+    for (; w < ws; w = C.addDays(w, 7)) {
+      const left = C.round2(base + carry - weekSpend(w));
+      if (left >= 0) carry = rs && w >= rs ? Math.min(base, left) : 0;
+      else carry = os && w >= os ? left : 0;
+    }
+    return C.round2(base + carry);
   }
   const SUB_DAYS = 90;
   const subsDue = () => S.bills.filter((b) => b.cat === 'subs' && (!b.reviewed || C.daysBetween(b.reviewed, C.today()) >= SUB_DAYS));
@@ -576,7 +584,7 @@
     h += card('Weekly spending money', `<input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}"><p class="muted small">One limit for food, Amazon, and anything else that is not a bill. About ${fm(poolMonth(m))} a month.</p>`);
     h += card('Spending types', '<p class="muted small">The kinds of things your weekly money goes to. Rename them or add your own.</p>' + S.cats.map((c, i) => c.kind !== 'flex' ? '' : `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" value="${esc(c.name)}">${c.id === 'other' ? '' : `<button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button>`}</div>`).join('') + '<button class="mt btn" data-act="addType">Add a type</button>');
     h += card('Monthly bills and fixed costs', S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join(''));
-    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over. Going over does not carry, so a bad week never eats into the next one.</p>`);
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>`);
     const lo = LO();
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
@@ -628,7 +636,7 @@
     h += trend;
     if (isW) {
       const fw = weekLimit(r.from), fs = C.round2(sum(Object.keys(r.byCat).filter(isFlex), (k) => r.byCat[k]));
-      if (fw) h += card('Spending money', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fs / fw, C.status(fs / fw))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
+      if (fw || budgetOf().foodWeek) h += card('Spending money', `<p class="big ${fs > fw ? 'r' : 'g'}">${fm(fs)} <span class="muted med">of ${fm(fw)}</span></p>${bar(fw > 0 ? fs / fw : 1, C.status(fw > 0 ? fs / fw : 1))}<p class="muted">${fs > fw ? fm(fs - fw) + ' over the weekly limit.' : fm(fw - fs) + ' under the weekly limit.'}</p>`);
     }
 
     const cats = Object.keys(r.byCat).sort((a, c) => r.byCat[c] - r.byCat[a]);
@@ -1344,6 +1352,7 @@
       openSheet(`<h2>Paid ${esc(c.name)}</h2><form data-form="paycard"><input type="hidden" name="id" value="${c.id}"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" value="${(c.balance || 0).toFixed(2)}" autocomplete="off"><label class="f">Paid from</label><select name="from">${srcs.map((a) => `<option value="${a.id}" ${a.type === payType() ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="">Somewhere else</option></select><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><p class="muted small">Lowers what the card owes and takes it out of the account you pick.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
     },
     toggleAutoBal(d, el) { S.autoBal = el.checked; if (S.autoBal) S.balSince = C.today(); save(); render(); toast(S.autoBal ? 'Purchases from today on will update balances' : 'Automatic balances off'); },
+    toggleOver(d, el) { S.overCarry = el.checked; if (S.overCarry && !S.overSince) S.overSince = C.weekStart(C.today()); save(); render(); },
     toggleRoll(d, el) { S.rollover = el.checked; if (S.rollover && !S.rollSince) S.rollSince = C.weekStart(C.today()); save(); render(); },
     rcptPick() { $('#rcptfile').click(); },
     rcptClear() { ui.rcpt = null; ui.rcptDel = true; $('#rcptbox').innerHTML = rcptBoxHTML(); },
@@ -1554,6 +1563,7 @@
     poolSpending();
     addSpendTypes();
     momStrict();
+    overCarryOn();
     LO();
     render();
     if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
@@ -1603,6 +1613,15 @@
     LO().start = C.shiftMonthKey(C.monthKey(C.today()), 1);
     S.momStrict = true; save();
     setTimeout(() => toast('Mom payback is now a strict $150 a month'), 900);
+  }
+  // One time: overspending in a week now comes out of the next week, starting this week.
+  function overCarryOn() {
+    if (S.overCarryInit && (!S.overCarry || S.overSince)) return;
+    const first = !S.overCarryInit;
+    if (!S.overCarryInit) { S.overCarry = true; S.overCarryInit = true; }
+    if (S.overCarry && !S.overSince) S.overSince = C.weekStart(C.today());
+    save();
+    if (first && S.expenses.length) setTimeout(() => toast('Overspending now comes out of next week'), 1000);
   }
   async function lock() {
     await flush(); V.lock(); S = null; closeSheet(); showLock();
