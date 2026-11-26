@@ -143,8 +143,12 @@
       h += left > 0 ? `<p class="tc med">${fm(left / days)} a day for the next ${days} day${days === 1 ? '' : 's'}</p>` : `<p class="tc med r">${fm(-left)} over. Try to spend nothing until Sunday.</p>`;
       h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent. Today: ${fm(today)}.</p>`;
     } else h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent, ${C.shortDate(ws)} to ${C.shortDate(we)}.</p>`;
-    if (fw > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - b.foodWeek)} rolled over from earlier weeks.</p>`;
-    else if (fw < b.foodWeek) h += `<p class="tc small y">${fm(b.foodWeek - fw)} taken out to cover overspending from earlier weeks.</p>`;
+    const cv = coverOf(ws);
+    if (cv) h += `<p class="tc muted small">Includes ${fm(cv)} covered by savings.</p>`;
+    if (fw - cv > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - cv - b.foodWeek)} rolled over from earlier weeks.</p>`;
+    else if (fw - cv < b.foodWeek) h += `<p class="tc small y">${fm(b.foodWeek - fw + cv)} taken out to cover overspending from earlier weeks.</p>`;
+    const need = coverNeed(ws);
+    if (isNow && need >= 1 && (fw <= 0 || sp - fw >= b.foodWeek / 2 || b.foodWeek - fw >= b.foodWeek / 2)) h += `<button class="mt btn" data-act="coverSheet" data-ws="${ws}">Cover ${fm(need)} with savings</button>`;
     return h;
   }
   // ---------- money left over each month goes to savings ----------
@@ -288,15 +292,23 @@
     const base = budgetOf().foodWeek || 0;
     const rs = S.rollover && S.rollSince ? C.weekStart(S.rollSince) : null;
     const os = S.overCarry && S.overSince ? C.weekStart(S.overSince) : null;
-    if (!base || (!rs && !os)) return base;
+    const cov = coverOf(ws);
+    if (!base || (!rs && !os)) return C.round2(base + cov);
     let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
     let carry = 0;
     for (; w < ws; w = C.addDays(w, 7)) {
-      const left = C.round2(base + carry - weekSpend(w));
+      const left = C.round2(base + carry + coverOf(w) - weekSpend(w));
       if (left >= 0) carry = rs && w >= rs ? Math.min(base, left) : 0;
       else carry = os && w >= os ? left : 0;
     }
-    return C.round2(base + carry);
+    return C.round2(base + carry + cov);
+  }
+  // Money moved from savings to cover a big overspend in a given week.
+  const coverOf = (ws) => C.round2(sum((S.covers || []).filter((c) => c.ws === ws), (c) => c.amount));
+  // How much it takes to get a week back on track: undo the cut from earlier weeks and clear any overage.
+  function coverNeed(ws) {
+    const base = budgetOf().foodWeek || 0, fw = weekLimit(ws), sp = weekSpend(ws);
+    return C.round2(Math.max(0, base - fw, sp - fw));
   }
   const SUB_DAYS = 90;
   const subsDue = () => S.bills.filter((b) => b.cat === 'subs' && (!b.reviewed || C.daysBetween(b.reviewed, C.today()) >= SUB_DAYS));
@@ -1061,6 +1073,12 @@
 
   // ---------- forms ----------
   const forms = {
+    cover(fd) {
+      const amount = C.round2(C.num(fd.get('amount')));
+      if (!(amount > 0)) { toast('Enter an amount'); return; }
+      (S.covers = S.covers || []).push({ id: uid(), ws: fd.get('ws'), amount, date: C.today() });
+      save(); closeSheet(); render(); toast(fm(amount) + ' covered with savings');
+    },
     expense(fd) {
       const amount = C.round2(C.num(fd.get('amount')));
       if (!(amount > 0)) { toast('Enter an amount'); return; }
@@ -1352,6 +1370,11 @@
       openSheet(`<h2>Paid ${esc(c.name)}</h2><form data-form="paycard"><input type="hidden" name="id" value="${c.id}"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" value="${(c.balance || 0).toFixed(2)}" autocomplete="off"><label class="f">Paid from</label><select name="from">${srcs.map((a) => `<option value="${a.id}" ${a.type === payType() ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="">Somewhere else</option></select><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><p class="muted small">Lowers what the card owes and takes it out of the account you pick.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
     },
     toggleAutoBal(d, el) { S.autoBal = el.checked; if (S.autoBal) S.balSince = C.today(); save(); render(); toast(S.autoBal ? 'Purchases from today on will update balances' : 'Automatic balances off'); },
+    coverSheet(d) {
+      const ws = d.ws, need = coverNeed(ws), cv = coverOf(ws);
+      openSheet(`<h2>Cover with savings</h2><p class="muted">Use savings instead of making the next weeks pay it back. This week's spending money goes up by this amount.</p><form data-form="cover"><input type="hidden" name="ws" value="${ws}"><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${need.toFixed(2)}"><p class="muted small">It comes out of what you save this month, so your savings goes down by the same amount.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Cover it</button></div></form>${cv ? `<p class="muted small mt">Already covered this week: ${fm(cv)}.</p><button class="mt btn small danger" data-act="uncover" data-ws="${ws}">Undo cover</button>` : ''}`);
+    },
+    uncover(d) { S.covers = (S.covers || []).filter((c) => c.ws !== d.ws); save(); closeSheet(); render(); toast('Cover removed'); },
     toggleOver(d, el) { S.overCarry = el.checked; if (S.overCarry && !S.overSince) S.overSince = C.weekStart(C.today()); save(); render(); },
     toggleRoll(d, el) { S.rollover = el.checked; if (S.rollover && !S.rollSince) S.rollSince = C.weekStart(C.today()); save(); render(); },
     rcptPick() { $('#rcptfile').click(); },
