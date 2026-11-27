@@ -1,5 +1,24 @@
 [
   {
+    "v": 35,
+    "date": "2026-11-27",
+    "title": "Fix last week",
+    "items": [
+      {
+        "type": "new",
+        "text": "When you look at a past week in Budget, there is now an Add a purchase to that week button, so you can log something you forgot."
+      },
+      {
+        "type": "change",
+        "text": "Tapping a purchase in any past week lets you change it, move its date, or delete it. A small note under the list now says so."
+      },
+      {
+        "type": "fix",
+        "text": "A past week no longer says this week. It now says left that week and spent that week."
+      }
+    ]
+  },
+  {
     "v": 34,
     "date": "2026-11-27",
     "title": "Smoother first day",

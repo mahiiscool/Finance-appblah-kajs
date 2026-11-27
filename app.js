@@ -213,7 +213,7 @@
     const base = fwAt(ws), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw > 0 ? sp / fw : (fw < 0 || sp > 0 ? 1 : 0);
     const t = C.today(), days = daysToSunday();
     const today = sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date === t), (e) => e.amount);
-    let h = ring(pct, C.status(pct), fm(left), left < 0 ? 'over' : 'left this week');
+    let h = ring(pct, C.status(pct), fm(left), left < 0 ? 'over' : isNow ? 'left this week' : 'left that week');
     if (isNow) {
       h += left > 0 ? `<p class="tc med">${fm(left / days)} a day for the next ${days} day${days === 1 ? '' : 's'}</p>` : `<p class="tc med r">${fm(-left)} over. Try to spend nothing until Sunday.</p>`;
       h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent. Today: ${fm(today)}.</p>`;
@@ -665,7 +665,7 @@
     let h = `<div class="mb14 row"><button class="btn small" data-act="wnav" data-d="-1">Previous</button><div class="tc f1 muted">${C.shortDate(ws)} to ${C.shortDate(we)}</div><button class="btn small" data-act="wnav" data-d="1">Next</button></div>`;
     h += card('Spending money', weekHero(ws, ui.wOff === 0) + weekBreakdown(ws));
     const list = S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we).sort((a, c) => (a.date < c.date ? 1 : -1));
-    h += card('Spent this week', list.length ? list.map(expRow).join('') : '<p class="muted">Nothing logged yet.</p>');
+    h += card(ui.wOff === 0 ? 'Spent this week' : 'Spent that week', (list.length ? list.map(expRow).join('') + '<p class="muted small mt8">Tap a purchase to change it, move its date, or delete it.</p>' : '<p class="muted">Nothing logged yet.</p>') + (ui.wOff < 0 ? `<button class="mt btn" data-act="addToWeek" data-d="${we}">Add a purchase to that week</button>` : ''));
     const pw = pastWeeks(8);
     if (pw.length) {
       const avg = sum(pw, (w) => w.sp) / pw.length, mx = Math.max(...pw.map((w) => Math.max(w.sp, w.lim)), 1);
@@ -834,7 +834,7 @@
   // ---------- how to use this app ----------
   const GUIDE = [
     ['Your weekly money', 'The ring on Home is how much you have left to spend this week on everything that is not a bill: food, fun, shopping. A new week starts every Sunday. Green means you are fine, yellow means slow down, red means you went over.', [['Open this week', 'weekDetail', {}]]],
-    ['Log what you spend', 'Tap the blue plus button at the bottom. Type the amount, tap what it was for, and Save. That is it. More options has the date, which card you used, refunds, and buying for someone else.', [['Log something', 'add', {}]]],
+    ['Log what you spend', 'Tap the blue plus button at the bottom. Type the amount, tap what it was for, and Save. That is it. More options has the date, which card you used, refunds, and buying for someone else. Forgot something last week? In Budget, tap Previous, then tap any purchase to fix it, or tap Add a purchase to that week.', [['Log something', 'add', {}]]],
     ['Payday', 'Every time you get paid, tap I got paid on Home and type the amount that landed in your account. The app shows where the paycheck should go. Logging every paycheck is what lets the app tell you if you came up short. Logged a wrong one? Budget, Month lists your paychecks, and Delete undoes it.', [['I got paid', 'paycheck', {}], ['See this month', 'bview', { v: 'month', go: 1 }]]],
     ['Bills', 'Your monthly bills live in More, Recurring bills. Adding one there also adds it to your monthly budget. Check a bill off when you pay it. If a bank import already brought in that charge, checking it off matches it, so it only counts once. Give each one a due day to get reminders.', [['Recurring bills', 'openMore', { v: 'bills' }]]],
     ['The To do card', 'Home shows a To do card when something needs you: a paycheck to log, a bill past due, a refund you are waiting on, a backup. Tap the button to do it, or Later to hide it until tomorrow. If a payday really had no paycheck, tap No paycheck. The app keeps track so you do not have to.', []],
@@ -1413,7 +1413,7 @@
   }
   const wizForm = () => { const f = $('#sheet form[data-form=wiz]'); if (f) wizSave(ui.wiz, new FormData(f)); };
 
-  function addSheet(id, preCat) {
+  function addSheet(id, preCat, preDate) {
     const e = id ? S.expenses.find((x) => x.id === id) : null;
     const cat = e ? e.cat : preCat || (isFlex(ui.lastCat) ? ui.lastCat : 'food'), acct = e ? e.account : S.lastAccount;
     ui.rcpt = null; ui.rcptDel = false; ui.rcptFor = e ? e.id : null;
@@ -1422,11 +1422,11 @@
       <label class="f">Spending money</label><div class="chips">${S.cats.filter((c) => c.kind === 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Bills and gas</label><div class="chips">${S.cats.filter((c) => c.kind !== 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional, like Chipotle" value="${esc(e ? e.note : '')}">
-      <details class="more" ${e ? 'open' : ''}><summary>More options <span class="muted small">date, card, refund, someone else, savings</span></summary>
+      <details class="more" ${e || preDate ? 'open' : ''}><summary>More options <span class="muted small">date, card, refund, someone else, savings</span></summary>
       <label class="check"><input type="checkbox" name="refund" ${e && e.amount < 0 ? 'checked' : ''}>Refund or return, money came back</label>
       <label class="f">Receipt photo</label><div id="rcptbox">${rcptBoxHTML()}</div><input type="file" id="rcptfile" accept="image/*" hidden>
       <label class="f">Card or account</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === acct ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash" ${acct === 'cash' ? 'selected' : ''}>Cash or other</option></select>
-      <label class="f">Date</label><input type="date" name="date" value="${e ? e.date : C.today()}">
+      <label class="f">Date</label><input type="date" name="date" value="${e ? e.date : preDate || C.today()}">
       <label class="mt check"><input type="checkbox" name="forOther" data-toggle="personbox" ${e && e.forOther ? 'checked' : ''}>Bought for someone else</label>
       <div id="personbox" ${e && e.forOther ? '' : 'hidden'}><input type="text" name="person" placeholder="Who owes you?" autocomplete="off" value="${esc(e ? e.forOther : '')}"></div>
       <label class="check"><input type="checkbox" name="oneTime" ${e && e.paidFromSavings ? 'checked' : ''}>One time, paid from savings</label>
@@ -1676,6 +1676,7 @@
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
     logGas() { addSheet(null, 'gas'); },
+    addToWeek(d) { addSheet(null, null, d.d); },
     moveLeftover(d) {
       const lo = LO(), amt = leftToMove(d.mk); if (!(amt > 0)) return;
       lo.moved[d.mk] = amt;
