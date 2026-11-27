@@ -77,14 +77,28 @@
     return neg ? -n : n;
   };
 
+  // A date with no year is the most recent one: this year, or last year if this year's would still be ahead.
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  Core.noYear = (mo, d) => {
+    let y = new Date().getFullYear();
+    if (y + '-' + pad(mo) + '-' + pad(d) > Core.addDays(Core.today(), 1)) y--;
+    return y + '-' + pad(mo) + '-' + pad(d);
+  };
   Core.parseDate = (str, fallback) => {
     const s = String(str || '').trim();
     let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
     if (m) return m[1] + '-' + pad(+m[2]) + '-' + pad(+m[3]);
     m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
     if (m) { let y = +m[3]; if (y < 100) y += 2000; return y + '-' + pad(+m[1]) + '-' + pad(+m[2]); }
+    m = s.match(/^(\d{1,2})[\/-](\d{1,2})(?:\s|$)/);
+    if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31) return Core.noYear(+m[1], +m[2]);
+    m = s.match(/^([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:,?\s+(\d{4}))?\b/i);
+    if (m && MONTHS.includes(m[1].toLowerCase()) && +m[2] >= 1 && +m[2] <= 31) {
+      const mo = MONTHS.indexOf(m[1].toLowerCase()) + 1;
+      return m[3] ? m[3] + '-' + pad(mo) + '-' + pad(+m[2]) : Core.noYear(mo, +m[2]);
+    }
     const d = new Date(s);
-    if (!isNaN(d.getTime())) return Core.ymd(d);
+    if (!isNaN(d.getTime())) return /\d{4}/.test(s) ? Core.ymd(d) : Core.noYear(d.getMonth() + 1, d.getDate());
     return fallback || Core.today();
   };
 
@@ -110,9 +124,8 @@
       const matches = [...line.matchAll(moneyRe)];
       const dm = line.match(dateRe);
       if (dm && matches.length === 0) {
-        const y = dm[3] ? +dm[3] : new Date().getFullYear();
         const mi = months.split('|').indexOf(dm[1].slice(0, 3).toLowerCase());
-        date = y + '-' + pad(mi + 1) + '-' + pad(+dm[2]);
+        date = dm[3] ? dm[3] + '-' + pad(mi + 1) + '-' + pad(+dm[2]) : Core.noYear(mi + 1, +dm[2]);
         continue;
       }
       if (!matches.length) continue;

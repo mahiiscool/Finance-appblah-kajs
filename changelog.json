@@ -1,5 +1,60 @@
 [
   {
+    "v": 32,
+    "date": "2026-11-27",
+    "title": "Bug fixes",
+    "items": [
+      {
+        "type": "fix",
+        "text": "A refund for a trip purchase, or for something you bought for someone else, no longer counts as extra weekly money. It goes back to the trip fund, or lowers what that person owes you."
+      },
+      {
+        "type": "fix",
+        "text": "Bills you add later in Recurring bills now count in your monthly budget. A new bill can be its own type, like Rent, so it never lands under the wrong one or eats your weekly money."
+      },
+      {
+        "type": "fix",
+        "text": "Checking off a bill that a bank import already brought in now matches that charge instead of counting it twice. Imports also match bill charges on their own."
+      },
+      {
+        "type": "new",
+        "text": "Logged a wrong paycheck? Budget, Month lists your paychecks with a Delete button, and deleting one also undoes the goal money and balance it added. Logging the same paycheck twice asks first."
+      },
+      {
+        "type": "fix",
+        "text": "Savings you move on payday is no longer counted twice at the end of the month. A month that needs money pulled from savings no longer also tells you to move a leftover into savings."
+      },
+      {
+        "type": "fix",
+        "text": "Changing your weekly money now starts with this week. Past weeks keep the amount they had, so their results stay the same."
+      },
+      {
+        "type": "fix",
+        "text": "With rollover on, money you did not spend only carries inside the same month. What is left at the end of a month already counts as saved."
+      },
+      {
+        "type": "change",
+        "text": "The paycheck reminder has a No paycheck button for paydays you really skipped, and it always points to your latest missed payday."
+      },
+      {
+        "type": "fix",
+        "text": "Removing your last subscription sets the subscriptions budget back to 0."
+      },
+      {
+        "type": "fix",
+        "text": "Switching to a blank budget keeps your paychecks, card payments, and goal history."
+      },
+      {
+        "type": "fix",
+        "text": "Deleting an IOU that came from a purchase now counts that purchase as yours instead of losing it."
+      },
+      {
+        "type": "fix",
+        "text": "Bank dates with no year, like 12/28, now get the right year, and a minus sign or a cleared box in your budget numbers can no longer break anything."
+      }
+    ]
+  },
+  {
     "v": 31,
     "date": "2026-11-27",
     "title": "Help built in",

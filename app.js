@@ -102,6 +102,18 @@
     return s;
   }
 
+  // Switching to a blank budget keeps everything you logged. Only the budget, bills, preloaded rules, and goal targets start over.
+  const KEEP = ['expenses', 'ious', 'accounts', 'paychecks', 'transfers', 'covers', 'pulled', 'incomeFix', 'leftover', 'lastBackup', 'lastImport', 'csvMap', 'setupDone', 'paySource', 'lastAccount', 'dismissed', 'tourDone', 'logSeen', 'autoBal', 'balSince', 'balCheck', 'poolSpend', 'spendTypes', 'overCarryInit', 'overCarry', 'overSince', 'rollover', 'rollSince', 'overSettle', 'shortFromSav'];
+  function blankKeep(old) {
+    const s = blankState(), pre = defaultState().rules.map((r) => r.match + '|' + r.cat);
+    KEEP.forEach((k) => { if (old[k] !== undefined) s[k] = old[k]; });
+    Object.keys(s.goals).forEach((k) => { if (old.goals && old.goals[k]) s.goals[k].contribs = old.goals[k].contribs || []; });
+    // Types your purchases use stay, so nothing you logged moves into your weekly money.
+    (old.cats || []).forEach((c) => { if (!s.cats.some((x) => x.id === c.id) && (old.expenses || []).some((e) => e.cat === c.id)) { const at = s.cats.findIndex((x) => x.kind === 'flex'); s.cats.splice(c.kind === 'fixed' && at >= 0 ? at : s.cats.length - 1, 0, Object.assign({}, c)); ['school', 'summer'].forEach((m) => { s.budget[m].amounts[c.id] = 0; }); } });
+    s.rules = (old.rules || []).filter((r) => !pre.includes(r.match + '|' + r.cat) && s.cats.some((c) => c.id === r.cat));
+    return s;
+  }
+
   // ---------- persistence ----------
   function save() { dirty = true; clearTimeout(saveT); saveT = setTimeout(flush, 350); }
   async function flush() {
@@ -116,6 +128,16 @@
   const budgetOf = (m) => S.budget[m || S.mode];
   const catName = (id) => { if (id === '__hh') return 'Household (ignored)'; const c = S.cats.find((x) => x.id === id); return c ? c.name : 'Other'; };
   const counted = (e) => !e.paidFromSavings && !e.forOther && !e.household && !e.fromFund && !e.fromTrip;
+  // A refund goes back where the purchase came from: savings, the trip fund, the insurance fund, or someone else.
+  const refundFlags = (e) => ({ paidFromSavings: !!e.paidFromSavings, fromTrip: !!e.fromTrip, fromFund: !!e.fromFund, household: !!e.household, forOther: e.forOther || '' });
+  // A return on something bought for someone else lowers what they owe you. Returns text for the toast.
+  function iouRefund(e, amount) {
+    const i = e.forOther ? S.ious.find((x) => x.expenseId === e.id && !x.settled) : null; if (!i) return '';
+    const cut = C.round2(Math.min(amount, remaining(i))); if (!(cut > 0)) return '';
+    i.amount = C.round2(i.amount - cut); i.refunded = C.round2((i.refunded || 0) + cut);
+    if (remaining(i) <= 0.004) i.settled = true;
+    return i.settled ? '. ' + i.person + ' owes nothing now.' : '. ' + i.person + ' now owes ' + fm(remaining(i)) + '.';
+  }
   function incomeOf(mode) {
     const b = S.budget[mode];
     if (mode === 'school') return b.income;
@@ -139,18 +161,56 @@
     for (; C.monthKey(w) === mk; w = C.addDays(w, 7)) out.push(w);
     return out;
   }
-  const monthPlan = (mk) => C.round2((budgetOf(modeFor(mk)).foodWeek || 0) * weeksOf(mk).length);
+  // Weekly money for one week. A new amount starts with the week you change it, so past weeks keep what they had.
+  function fwAt(ws) {
+    const m = modeFor(C.monthKey(ws)), cur = (S.budget[m] || {}).foodWeek || 0, h = (S.fwHist || {})[m];
+    if (h) for (const x of h) if (ws < x.until) return x.v;
+    return cur;
+  }
+  function setFoodWeek(m, v) {
+    const b = S.budget[m]; if (!b) return;
+    v = C.round2(Math.abs(C.num(v))); const old = b.foodWeek || 0; if (old === v) return;
+    const w = C.weekStart(C.today()), h = ((S.fwHist = S.fwHist || {})[m] = S.fwHist[m] || []);
+    if (old > 0 && !h.some((x) => x.until >= w)) h.push({ until: w, v: old });
+    b.foodWeek = v;
+  }
+  const monthPlan = (mk) => C.round2(sum(weeksOf(mk), fwAt));
   const monthFlex = (mk) => C.round2(sum(weeksOf(mk), (w) => weekSpend(w)));
   // Subscriptions budget is the total of the subscription bills in Recurring bills.
   function syncSubs() {
-    const list = (S.bills || []).filter((b) => b.cat === 'subs'); if (!list.length) return false;
+    const list = (S.bills || []).filter((b) => b.cat === 'subs');
+    if (!list.length) {
+      // The last subscription is gone, so the budget that came from the list goes to 0. A number you typed yourself stays.
+      if (!S.subsTot) return false;
+      ['school', 'summer'].forEach((m) => { if (S.budget[m] && S.budget[m].amounts.subs === S.subsTot) S.budget[m].amounts.subs = 0; });
+      S.subsTot = 0; return true;
+    }
     const tot = C.round2(sum(list, (b) => b.amount)); let ch = false;
+    if (S.subsTot !== tot) { S.subsTot = tot; ch = true; }
     ['school', 'summer'].forEach((m) => { if (S.budget[m] && S.budget[m].amounts.subs !== tot) { S.budget[m].amounts.subs = tot; ch = true; } });
     return ch;
   }
+  // A new monthly fixed cost with its own name, like Rent.
+  function newFixedCat(name) {
+    const id = uid(), at = S.cats.findIndex((c) => c.kind === 'flex');
+    S.cats.splice(at < 0 ? S.cats.length : at, 0, { id, name: String(name || 'New bill').slice(0, 40), kind: 'fixed', custom: true });
+    ['school', 'summer'].forEach((m) => { S.budget[m].amounts[id] = 0; });
+    return id;
+  }
+  // A bill type's monthly budget is never lower than the recurring bills in it, so every bill is part of the plan.
+  function coverBills() {
+    const need = {}; let ch = false;
+    S.bills.forEach((x) => { if (x.cat !== 'subs' && !isFlex(x.cat)) need[x.cat] = C.round2((need[x.cat] || 0) + x.amount); });
+    Object.keys(need).forEach((c) => ['school', 'summer'].forEach((m) => { const a = S.budget[m].amounts; if ((a[c] || 0) < need[c]) { a[c] = need[c]; ch = true; } }));
+    return ch;
+  }
+  // A bill with its own type keeps the type's name in step with the bill's name.
+  function renameOwnCat(bill, was) { const c = S.cats.find((x) => x.id === bill.cat); if (c && c.custom && bill.name && c.name === was) c.name = bill.name.slice(0, 40); }
+  // Bill type choices: monthly fixed costs only, so a bill never eats your weekly money.
+  const billCatOpts = (sel) => `<option value="__new" ${sel === '__new' ? 'selected' : ''}>Its own bill type</option>` + S.cats.filter((c) => c.kind === 'fixed' || c.id === sel).map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   // The weekly spending money card, used on Home and in Budget > Week.
   function weekHero(ws, isNow) {
-    const b = budgetOf(), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw > 0 ? sp / fw : (fw < 0 || sp > 0 ? 1 : 0);
+    const base = fwAt(ws), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw > 0 ? sp / fw : (fw < 0 || sp > 0 ? 1 : 0);
     const t = C.today(), days = daysToSunday();
     const today = sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && e.date === t), (e) => e.amount);
     let h = ring(pct, C.status(pct), fm(left), left < 0 ? 'over' : 'left this week');
@@ -160,10 +220,10 @@
     } else h += `<p class="tc muted">${fm(sp)} of ${fm(fw)} spent, ${C.shortDate(ws)} to ${C.shortDate(we)}.</p>`;
     const cv = coverOf(ws);
     if (cv) h += `<p class="tc muted small">Includes ${fm(cv)} covered by savings.</p>`;
-    if (fw - cv > b.foodWeek) h += `<p class="tc muted small">Includes ${fm(fw - cv - b.foodWeek)} rolled over from earlier weeks.</p>`;
-    else if (fw - cv < b.foodWeek) h += `<p class="tc small y">${fm(b.foodWeek - fw + cv)} taken out to cover overspending from earlier weeks.</p>`;
+    if (fw - cv > base) h += `<p class="tc muted small">Includes ${fm(fw - cv - base)} rolled over from earlier weeks.</p>`;
+    else if (fw - cv < base) h += `<p class="tc small y">${fm(base - fw + cv)} taken out to cover overspending from earlier weeks.</p>`;
     const need = coverNeed(ws);
-    if (isNow && need >= 1 && (fw <= 0 || sp - fw >= b.foodWeek / 2 || b.foodWeek - fw >= b.foodWeek / 2)) h += `<button class="mt btn" data-act="coverSheet" data-ws="${ws}">Cover ${fm(need)} with savings</button>`;
+    if (isNow && need >= 1 && (fw <= 0 || sp - fw >= base / 2 || base - fw >= base / 2)) h += `<button class="mt btn" data-act="coverSheet" data-ws="${ws}">Cover ${fm(need)} with savings</button>`;
     return h;
   }
   // ---------- money left over each month goes to savings ----------
@@ -220,10 +280,19 @@
     const bills = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0)), weekly = monthPlan(mk), need = C.round2(bills + weekly);
     const days = paydaysIn(mk, done ? null : t), per = checkFor(mk);
     const expected = days ? C.round2(days.length * per) : null, gap = expected === null ? 0 : C.round2(expected - got), missed = expected === null ? null : gap >= per / 2 ? gap : 0;
-    const pull = C.round2(Math.max(0, need - made)), pulled = C.round2(((S.pulled || {})[mk] || 0) + ((offOf(mk) || {}).moved || 0));
+    const moved = payMoved(mk), pull = C.round2(Math.max(0, need + moved - made)), pulled = C.round2(((S.pulled || {})[mk] || 0) + ((offOf(mk) || {}).moved || 0));
     const out = monthOut(mk);
     return { done, made, typed, noPay: !typed && got === 0, bills, weekly, weeks: weeksOf(mk).length, need, pull, pulled, still: C.round2(Math.max(0, pull - pulled)),
-      out, realShort: C.round2(Math.max(0, out - made)), checks: days ? days.length : null, per, expected, missed };
+      out, moved, realShort: C.round2(Math.max(0, out + moved - made)), checks: days ? days.length : null, per, expected, missed };
+  }
+  // Savings you moved to goals on payday that month. That money already left checking.
+  const payMoved = (mk) => C.round2(sum(Object.values(S.goals), (g) => sum((g.contribs || []).filter((c) => !c.bonus && (c.fromPay || c.note === 'From paycheck') && C.monthKey(c.date) === mk), (c) => c.amount)));
+  // What to move to savings after a month: what was left, minus what you already saved on payday.
+  // Nothing when that month needs money pulled from savings instead, so the app never says both.
+  function leftToMove(mk) {
+    const lo = LO(); if (mk < lo.start || mk >= C.monthKey(C.today()) || lo.moved[mk] !== undefined) return 0;
+    if (closeOut(mk).pull >= 1) return 0;
+    const v = C.round2(leftoverOf(mk) - payMoved(mk)); return v >= 1 ? v : 0;
   }
   function offPlan(mk) {
     const o = offOf(mk); if (!o) return null;
@@ -268,8 +337,8 @@
     inner += `<p class="muted small">If you pay every bill and spend all your weekly money. Every dollar of the ${fm(budgetOf().foodWeek)} a week you skip adds to it.${cur < lo.start ? ' Tracking starts ' + C.monthName(lo.start) + '.' : ''}</p>`;
     if (y.months.length || y.before || y.spent) inner += '<p class="label mt">This year</p>' + (y.before ? `<div class="row item"><span>Before tracking</span><b>${fm(y.before)}</b></div>` : '') + (y.spent ? `<div class="row item"><span>Spent from savings</span><b class="${y.spent > 0 ? 'r' : 'g'}">${y.spent > 0 ? 'minus ' : 'plus '}${fm(y.spent)}</b></div>` : '') +
       y.months.slice().reverse().map((m) => `<div class="row item"><span>${C.monthName(m.mk)}${lo.moved[m.mk] !== undefined ? '<span class="pill g">Moved</span>' : ''}${incomeNote(m.mk) && !/set this/.test(incomeNote(m.mk)) ? '<span class="pill y">Estimate</span>' : ''}</span><b class="${m.v < 0 ? 'r' : 'g'}">${m.v < 0 ? fm(m.v) + ' short' : fm(m.v)}</b></div>`).join('');
-    const lv = leftoverOf(last);
-    if (last >= lo.start && lo.moved[last] === undefined && lv > 0) inner += `<div class="card inset"><p class="med">${C.monthName(last)} left you ${fm(lv)}</p><p class="muted small">Move it from checking to savings, then tap below.</p><button class="mt8 btn primary" data-act="moveLeftover" data-mk="${last}">I moved it to savings</button></div>`;
+    const lv = leftToMove(last);
+    if (lv) inner += `<div class="card inset"><p class="med">${C.monthName(last)} left you ${fm(lv)}</p><p class="muted small">Move it from checking to savings, then tap below.</p><button class="mt8 btn primary" data-act="moveLeftover" data-mk="${last}">I moved it to savings</button></div>`;
     inner += `<p class="muted small mt8">Bonus this month: ${fm(bonusInMonth(cur))}. Bonus money goes straight to a goal.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`;
     return card('Savings', inner);
   }
@@ -338,6 +407,24 @@
   }
   const remaining = (i) => C.round2(i.amount - sum(i.payments, (p) => p.amount));
   const billPaid = (b, mk) => S.expenses.some((e) => e.billId === b.id && C.monthKey(e.date) === mk);
+  const STOP = ['and', 'the', 'for', 'bill', 'fund', 'payment'];
+  const billWords = (b) => String(b.name || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.includes(w));
+  // The recurring bill a bank charge belongs to: same amount, same month, not checked off yet, and the name matches (or it is the only bill of that type).
+  function billFor(e) {
+    if (!(e.amount > 0)) return null;
+    const mk = C.monthKey(e.date), note = String(e.note || '').toLowerCase(), c = C.cents(e.amount);
+    const open = S.bills.filter((b) => C.cents(b.amount) === c && !billPaid(b, mk));
+    const byName = open.filter((b) => billWords(b).some((w) => note.includes(w)));
+    if (byName.length) return byName[0];
+    const byCat = open.filter((b) => b.cat === e.cat && !isFlex(b.cat));
+    return byCat.length === 1 ? byCat[0] : null;
+  }
+  // A charge already logged or imported that is really this bill, so checking the bill off does not count it twice.
+  function chargeFor(b, mk) {
+    const c = C.cents(b.amount), words = billWords(b);
+    const list = S.expenses.filter((e) => !e.billId && e.amount > 0 && counted(e) && C.monthKey(e.date) === mk && C.cents(e.amount) === c);
+    return list.find((e) => words.some((w) => String(e.note || '').toLowerCase().includes(w))) || list.find((e) => e.cat === b.cat) || null;
+  }
   const dim = (mk) => { const p = mk.split('-').map(Number); return new Date(p[0], p[1], 0).getDate(); };
   const dueDate = (mk, day) => mk + '-' + pad(Math.min(day, dim(mk)));
   function nextBill() {
@@ -383,7 +470,7 @@
   // Weekly spending money limit. Unspent money carries forward when rollover is on (up to one week's worth),
   // and overspending carries forward as a smaller limit next week when overspend carry is on.
   function weekLimit(ws) {
-    const base = budgetOf().foodWeek || 0;
+    const base = fwAt(ws);
     const rs = S.rollover && S.rollSince ? C.weekStart(S.rollSince) : null;
     const os = S.overCarry && S.overSince ? C.weekStart(S.overSince) : null;
     const cov = coverOf(ws);
@@ -391,11 +478,19 @@
     let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
     let carry = 0, prevMk = null;
     // New month: overspending still owed gets paid from last month's leftover savings. Only what savings could not cover keeps carrying.
-    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 || offOf(prevMk) || S.shortFromSav !== false ? 0 : Math.max(carry, lv); } prevMk = mk; };
+    // Unspent money never rolls into a new month: what is left at month end already counts as saved.
+    const settle = (mk) => {
+      if (prevMk && mk !== prevMk) {
+        if (carry > 0) carry = 0;
+        else if (carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 || offOf(prevMk) || S.shortFromSav !== false ? 0 : Math.max(carry, lv); }
+      }
+      prevMk = mk;
+    };
     for (; w < ws; w = C.addDays(w, 7)) {
       settle(C.monthKey(w));
-      const left = C.round2(base + carry + coverOf(w) - weekSpend(w));
-      if (left >= 0) carry = rs && w >= rs ? Math.min(base, left) : 0;
+      const bw = fwAt(w); if (!bw) { carry = 0; continue; }
+      const left = C.round2(bw + carry + coverOf(w) - weekSpend(w));
+      if (left >= 0) carry = rs && w >= rs ? Math.min(bw, left) : 0;
       else carry = os && w >= os ? left : 0;
     }
     settle(C.monthKey(ws));
@@ -405,7 +500,7 @@
   const coverOf = (ws) => C.round2(sum((S.covers || []).filter((c) => c.ws === ws), (c) => c.amount));
   // How much it takes to get a week back on track: undo the cut from earlier weeks and clear any overage.
   function coverNeed(ws) {
-    const base = budgetOf().foodWeek || 0, fw = weekLimit(ws), sp = weekSpend(ws);
+    const base = fwAt(ws), fw = weekLimit(ws), sp = weekSpend(ws);
     return C.round2(Math.max(0, base - fw, sp - fw));
   }
   const SUB_DAYS = 90;
@@ -455,7 +550,7 @@
   // ---------- reminders for things only you can fill in ----------
   function todoItems() {
     const t = C.today(), mk = C.monthKey(t), day = +t.slice(8), last = C.shiftMonthKey(mk, -1), lo = LO(), out = [];
-    const add = (k, text, act, btn, data, cls) => { if (!S.dismissed['todo' + k + t]) out.push({ k, text, act, btn, data: data || {}, cls }); };
+    const add = (k, text, act, btn, data, cls, skip) => { if (!S.dismissed['todo' + k + t] && !S.dismissed['todo' + k]) out.push({ k, text, act, btn, data: data || {}, cls, skip }); };
     // back up, at least once a week
     const lb = S.lastBackup;
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7)) add('bk', lb ? `It has been ${C.daysBetween(lb, t)} days since your last backup. Your data only lives on this phone, so save a backup to iCloud Drive.` : 'You have not backed up yet. Your data only lives on this phone, so save a backup to iCloud Drive.', 'exportBackup', 'Back up now', {}, lb ? 'y' : 'r');
@@ -470,15 +565,16 @@
     // paycheck that should have come by now
     const pays = (S.paychecks || []).map((x) => x.date).sort();
     if (pays.length) {
-      const next = C.addDays(pays[pays.length - 1], DAYS_PER[payFreq()] || 14);
-      const nm = C.monthKey(next), off = offOf(nm);
-      if (C.daysBetween(next, t) >= 1 && !(off && loggedPay(nm) >= off.income)) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next });
+      // The latest payday that has passed since your last logged paycheck. No paycheck hides that one payday for good.
+      const per = DAYS_PER[payFreq()] || 14, n = Math.floor((C.daysBetween(pays[pays.length - 1], t) - 1) / per);
+      const next = n >= 1 ? C.addDays(pays[pays.length - 1], n * per) : null, nm = next && C.monthKey(next), off = next && offOf(nm);
+      if (next && !(off && loggedPay(nm) >= off.income)) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next }, '', 'No paycheck');
     }
     // close out last month: find out if you came up short and how much to pull from savings
     if (last >= lo.start) {
       const co = closeOut(last), nm = C.monthName(last);
       if (co.noPay) add('coinc' + last, `Close out ${nm}: no paycheck is logged. Log your paychecks, or enter what you made, even 0, so the app can tell you what to pull from savings.`, 'fixIncome', 'Enter pay', { mk: last }, 'y');
-      else if (co.still >= 1) add('co' + last + co.pulled, `Close out ${nm}: you made ${fm(co.made)}${co.missed ? ' (' + fm(co.missed) + ' less than your usual paychecks)' : ''} and needed ${fm(co.need)}. Pull ${fm(co.still)} from savings.`, 'pullSav', 'I pulled it', { mk: last, amt: co.still }, 'y');
+      else if (co.still >= 1) add('co' + last + co.pulled, `Close out ${nm}: you made ${fm(co.made)}${co.missed ? ' (' + fm(co.missed) + ' less than your usual paychecks)' : ''}${co.moved ? ', saved ' + fm(co.moved) + ' of it on payday,' : ''} and needed ${fm(co.need)}. Pull ${fm(co.still)} from savings.`, 'pullSav', 'I pulled it', { mk: last, amt: co.still }, 'y');
     }
     // time off planned for this month: money to move from savings ahead of time
     [mk].forEach((m) => { const op = offPlan(m); if (!op || m < lo.start) return;
@@ -495,7 +591,8 @@
     const owed = S.ious.filter((i) => !i.settled && i.dir === 'owedToMe' && C.daysBetween(i.date, t) > 14);
     if (owed.length) add('iou' + mk + owed.length, `Unpaid for over 2 weeks: ${owed.map((i) => esc(i.person) + ' ' + fm(remaining(i))).slice(0, 3).join(', ')}${owed.length > 3 ? ' and more' : ''}. Ask, settle, or forgive.`, 'tab', 'IOUs', { t: 'ious' });
     // last month's leftover not moved to savings yet
-    if (last >= lo.start && lo.moved[last] === undefined && leftoverOf(last) > 0) add('lo' + last, `${C.monthName(last)} left you ${fm(leftoverOf(last))}. Move it to savings.`, 'moveLeftover', 'I moved it', { mk: last }, 'g');
+    const ltm = leftToMove(last);
+    if (ltm) add('lo' + last, `${C.monthName(last)} left you ${fm(ltm)}${payMoved(last) ? ' more, on top of what you saved on payday' : ''}. Move it to savings.`, 'moveLeftover', 'I moved it', { mk: last }, 'g');
     // nothing logged lately
     const lastLog = S.expenses.filter((e) => e.source !== 'bill').map((e) => e.date).filter((d) => d <= t).sort().pop();
     if (lastLog && C.daysBetween(lastLog, t) >= 3) add('quiet' + lastLog, `Nothing logged since ${C.shortDate(lastLog)}. Any cash, Venmo, or card buys to add?`, 'add', 'Add one');
@@ -507,7 +604,7 @@
   }
   function todoCard() {
     const items = todoItems(); if (!items.length) return '';
-    return card('To do', items.map((x) => `<div class="item"><p class="${x.cls || ''}">${x.text}</p><div class="btns"><button class="btn small primary" data-act="${x.act}" ${Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(String(v))}"`).join(' ')}>${x.btn}</button><button class="btn small" data-act="todoLater" data-k="${esc(x.k)}">Later</button></div></div>`).join(''));
+    return card('To do', items.map((x) => `<div class="item"><p class="${x.cls || ''}">${x.text}</p><div class="btns"><button class="btn small primary" data-act="${x.act}" ${Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(String(v))}"`).join(' ')}>${x.btn}</button>${x.skip ? `<button class="btn small" data-act="todoSkip" data-k="${esc(x.k)}">${x.skip}</button>` : ''}<button class="btn small" data-act="todoLater" data-k="${esc(x.k)}">Later</button></div></div>`).join(''));
   }
   function Home() {
     const t = C.today(), mk = C.monthKey(t), b = budgetOf();
@@ -532,7 +629,7 @@
 
     h += gasCard();
     const pw = pastWeeks(4), under = pw.filter((w) => w.sp <= w.lim).length;
-    if (pw.length) h += card('Recent weeks', `<p class="med">${under} of ${pw.length} week${pw.length === 1 ? '' : 's'} under ${fm(budgetOf().foodWeek)}</p>` + pw.map((w) => `<div class="row item"><span>${C.shortDate(w.ws)}</span><b class="${w.sp > w.lim ? 'r' : 'g'}">${fm(w.sp)} <span class="muted small">${w.sp > w.lim ? fm(w.sp - w.lim) + ' over' : fm(w.lim - w.sp) + ' under'}</span></b></div>`).join(''));
+    if (pw.length) h += card('Recent weeks', `<p class="med">${under} of ${pw.length} week${pw.length === 1 ? '' : 's'} under the limit</p>` + pw.map((w) => `<div class="row item"><span>${C.shortDate(w.ws)}</span><b class="${w.sp > w.lim ? 'r' : 'g'}">${fm(w.sp)} <span class="muted small">${w.sp > w.lim ? fm(w.sp - w.lim) + ' over' : fm(w.lim - w.sp) + ' under'}</span></b></div>`).join(''));
 
     const billsDue = S.bills, paidN = billsDue.filter((x) => billPaid(x, mk)).length, unpaid = sum(billsDue.filter((x) => !billPaid(x, mk)), (x) => x.amount);
     if (billsDue.length) h += card('Bills this month', `<p class="med">${paidN} of ${billsDue.length} paid</p>${bar(paidN / billsDue.length, paidN === billsDue.length ? 'g' : 'b')}<p class="muted">${unpaid > 0 ? fm(unpaid) + ' still to pay from your monthly income.' : 'All paid. Nothing else to plan this month.'}</p><button class="mt8 btn small" data-act="openMore" data-v="bills">Recurring bills</button>`);
@@ -555,7 +652,7 @@
 
   // ---------- BUDGET ----------
   function BudgetTab() {
-    let h = `<div class="head"><h1 class="title">Budget</h1></div><div class="sub">${S.mode === 'school' ? 'School year' : 'Summer'} mode</div>`;
+    let h = `<div class="head"><h1 class="title">Budget</h1></div><div class="sub">${mahi() || S.mode === 'summer' ? (S.mode === 'school' ? 'School year' : 'Summer') + ' mode' : 'Your week, month, and history'}</div>`;
     h += `<div class="seg">${[['week', 'Week'], ['month', 'Month'], ['hist', 'History']].map((v) => `<button class="${ui.bview === v[0] ? 'on' : ''}" data-act="bview" data-v="${v[0]}">${v[1]}</button>`).join('')}</div>`;
     if (ui.bview === 'week') h += WeekView(); else if (ui.bview === 'month') h += MonthView(); else h += HistView();
     return h;
@@ -578,16 +675,18 @@
     let h = monthNav(mk, 'mnav');
     const wk = weeksOf(mk), flexSp = monthFlex(mk), pm = monthPlan(mk);
     const parts = S.cats.filter((c) => c.kind === 'flex').map((c) => ({ c, v: C.round2(sum(wk, (w) => weekSpend(w, c.id))) })).filter((x) => Math.abs(x.v) > 0.004).map((x) => esc(x.c.name) + ' ' + fm(x.v) + (x.v < 0 ? ' back' : '')).join(', ');
-    const pp = pm ? flexSp / pm : (flexSp ? 2 : 0), pc = C.status(pp);
-    const poolRow = `<div class="item"><div class="row"><span class="t">Spending money</span><span class="${pc}">${fm(flexSp)} of ${fm(pm)}</span></div>${bar(pp, pc)}<div class="muted small">${wk.length} weeks at ${fm(b.foodWeek || 0)}. ${flexSp > pm ? fm(flexSp - pm) + ' over' : fm(pm - flexSp) + ' left'}${parts ? '. ' + parts : ''}</div></div>`;
+    const pp = pm ? flexSp / pm : (flexSp ? 2 : 0), pc = C.status(pp), fws = wk.map(fwAt), fwSame = fws.every((v) => v === fws[0]);
+    const poolRow = `<div class="item"><div class="row"><span class="t">Spending money</span><span class="${pc}">${fm(flexSp)} of ${fm(pm)}</span></div>${bar(pp, pc)}<div class="muted small">${wk.length} weeks${fwSame ? ' at ' + fm(fws[0] || 0) : ''}. ${flexSp > pm ? fm(flexSp - pm) + ' over' : fm(pm - flexSp) + ' left'}${parts ? '. ' + parts : ''}</div></div>`;
     const rows = poolRow + S.cats.filter((c) => c.kind === 'fixed' && ((b.amounts[c.id] || 0) > 0 || (ms[c.id] || 0) > 0)).map((c) => {
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
-    if (mk < LO().start) h += card('Savings pull', `<p class="muted">Savings tracking starts ${C.monthName(LO().start)}, so there is nothing to pull for this month.</p>`);
+    if (mk < LO().start) h += card('Savings pull', `<p class="muted">Savings tracking starts ${C.monthName(LO().start)}, so there is nothing to pull for this month.</p>` + payList(mk));
     else { const co = closeOut(mk), row = (l, v, cls, sub) => `<div class="row item"><span>${l}${sub ? `<br><span class="muted small">${sub}</span>` : ''}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
       let inner = row(co.done ? 'You made' : 'Made so far', co.made, '', co.typed ? 'The income you typed' : co.checks !== null ? `Paychecks logged. ${co.checks} payday${co.checks === 1 ? '' : 's'}${co.done ? '' : ' so far'}, usually about ${fm(co.expected)}` : 'Paychecks logged');
+      inner += payList(mk);
       if (co.missed) inner += row('Pay missed', co.missed, 'r', 'Usual paychecks minus what you logged');
+      if (co.moved) inner += row('Saved on payday', co.moved, 'g', 'Already moved to your goals, so it is not there to spend');
       inner += row('You need', co.need, '', `Bills ${fm(co.bills)} plus weekly money ${fm(co.weekly)} (${co.weeks} weeks)`);
       if (co.noPay && co.done) inner += `<p class="small y mt8">No paycheck logged for this month. Log them or tap Set this month's income, even 0, to see what to pull.</p>`;
       else if (co.pull < 0.01) inner += `<p class="small g mt8">${co.done ? 'You made enough. Nothing to pull from savings.' : 'You have made enough for this month already. Nothing to pull.'}</p>`;
@@ -623,6 +722,11 @@
     const ft = sum(S.expenses.filter((e) => e.fromTrip && C.monthKey(e.date) === mk), (e) => e.amount);
     if (fs || fo || hh || fu || ft) h += card('Not counted', `${ft ? `<div class="row"><span>Trip, paid from the trip fund</span><b>${fm(ft)}</b></div>` : ''}${fu ? `<div class="row"><span>Insurance bill, paid from the fund</span><b>${fm(fu)}</b></div>` : ''}${hh ? `<div class="row"><span>Household, ignored</span><b>${fm(hh)}</b></div>` : ''}${fs ? `<div class="row"><span>Paid from savings</span><b>${fm(fs)}</b></div>` : ''}${fo ? `<div class="row"><span>Bought for others</span><b>${fm(fo)}</b></div>` : ''}`);
     return h;
+  }
+  // Paychecks logged in a month, so a wrong one can be found and deleted.
+  function payList(mk) {
+    const pcs = (S.paychecks || []).filter((x) => C.monthKey(x.date) === mk).sort((a, c) => (a.date < c.date ? -1 : 1)); if (!pcs.length) return '';
+    return `<details class="more"><summary>Paychecks logged (${pcs.length}) <span class="muted small">Tap to see or delete one</span></summary>${pcs.map((x) => `<div class="row item"><span>${C.shortDate(x.date)}</span><span class="row g8"><b>${fm(x.amount)}</b><button class="btn small danger" data-act="delPay" data-id="${x.id}">Delete</button></span></div>`).join('')}</details>`;
   }
   function expRow(e) {
     const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.refundPending ? '<span class="pill y">Refund pending</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.fromTrip ? '<span class="pill">Trip</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
@@ -728,16 +832,16 @@
   const GUIDE = [
     ['Your weekly money', 'The ring on Home is how much you have left to spend this week on everything that is not a bill: food, fun, shopping. A new week starts every Sunday. Green means you are fine, yellow means slow down, red means you went over.', [['Open this week', 'weekDetail', {}]]],
     ['Log what you spend', 'Tap the blue plus button at the bottom. Type the amount, tap what it was for, and Save. That is it. More options has the date, which card you used, refunds, and buying for someone else.', [['Log something', 'add', {}]]],
-    ['Payday', 'Every time you get paid, tap I got paid on Home and type the amount that landed in your account. The app shows where the paycheck should go. Logging every paycheck is what lets the app tell you if you came up short.', [['I got paid', 'paycheck', {}]]],
-    ['Bills', 'Your monthly bills live in More, Recurring bills. Check a bill off when you pay it. Give each one a due day and the app reminds you before it is due.', [['Recurring bills', 'openMore', { v: 'bills' }]]],
-    ['The To do card', 'Home shows a To do card when something needs you: a paycheck to log, a bill past due, a refund you are waiting on, a backup. Tap the button to do it, or Later to hide it until tomorrow. The app keeps track so you do not have to.', []],
+    ['Payday', 'Every time you get paid, tap I got paid on Home and type the amount that landed in your account. The app shows where the paycheck should go. Logging every paycheck is what lets the app tell you if you came up short. Logged a wrong one? Budget, Month lists your paychecks, and Delete undoes it.', [['I got paid', 'paycheck', {}], ['See this month', 'bview', { v: 'month', go: 1 }]]],
+    ['Bills', 'Your monthly bills live in More, Recurring bills. Adding one there also adds it to your monthly budget. Check a bill off when you pay it. If a bank import already brought in that charge, checking it off matches it, so it only counts once. Give each one a due day to get reminders.', [['Recurring bills', 'openMore', { v: 'bills' }]]],
+    ['The To do card', 'Home shows a To do card when something needs you: a paycheck to log, a bill past due, a refund you are waiting on, a backup. Tap the button to do it, or Later to hide it until tomorrow. If a payday really had no paycheck, tap No paycheck. The app keeps track so you do not have to.', []],
     ['Going over', 'If you spend more than your weekly money, next week starts with that much less. If a week goes really bad, use Cover with savings on Home instead. You can turn this off in Budget and income, under Rollover.', []],
     ['The 1st of the month', 'On the 1st, Home looks at last month: what you made versus what the month needed. If you came up short, it tells you exactly how much to pull from savings. Tap I pulled it and your balances update.', [['See this month', 'bview', { v: 'month', go: 1 }]]],
-    ['Refunds and returns', 'Returned something? Open that purchase and tick I returned this, waiting on the refund. Home reminds you until it comes back. When it does, tap It came and the money goes back into that week.', []],
+    ['Refunds and returns', 'Returned something? Open that purchase and tick I returned this, waiting on the refund. Home reminds you until it comes back. When it does, tap It came and the money goes back where the purchase came from: your week, the trip fund, or what a friend owes you.', []],
     ['Paying for someone else', 'When you pay for a friend, open More options and tick Bought for someone else. It does not count against you, and it shows up in IOUs. If they never pay you back, tap Forgive.', [['Open IOUs', 'tab', { t: 'ious' }]]],
     ['Savings goals', 'The Goals tab has your savings goals, like a trip fund. On a trip, tick Trip spending on purchases so they come out of the trip fund, not your weekly money.', [['Open Goals', 'tab', { t: 'goals' }]]],
     ['Your bank statement', 'You can import transactions from your bank as a CSV file, or a screenshot. The app sorts them, skips duplicates, and lists money coming in unchecked so you only tick real refunds.', [['Import', 'openMore', { v: 'import' }]]],
-    ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
+    ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works. A new weekly amount starts this week, and past weeks keep what they had.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
     ['Back up', 'Your data only lives on this phone. Back up every week and save the file to iCloud Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
     ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
   ];
@@ -846,7 +950,7 @@
       : `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join('') +
       '<button class="mt btn" data-act="addFixed">Add a bill</button><p class="muted small mt8">For anything you pay every month, like Amazon Prime. It counts toward your monthly bills, not your weekly money.</p>');
     h += card('Time off planning', `<label class="check"><input type="checkbox" data-act="toggleTimeOff" ${S.timeOffOn ? 'checked' : ''}>Plan time off ahead of time</label><p class="muted small">Optional. Off, the app just works out on the 1st how much to pull from savings for last month. On, you can also set lower pay for a month ahead of time on Budget, Month.</p>`);
-    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p><label class="check mt8"><input type="checkbox" data-act="toggleShort" ${S.shortFromSav !== false ? 'checked' : ''}>If a month comes up short, cover it all from savings</label><p class="muted small">On the 1st, the app tells you how much to pull from savings for last month, like when you missed a paycheck, and next month starts clean.</p>` : ''}`);
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over, inside the same month. What is left at the end of a month goes to savings.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p><label class="check mt8"><input type="checkbox" data-act="toggleShort" ${S.shortFromSav !== false ? 'checked' : ''}>If a month comes up short, cover it all from savings</label><p class="muted small">On the 1st, the app tells you how much to pull from savings for last month, like when you missed a paycheck, and next month starts clean.</p>` : ''}`);
     const lo = LO();
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
@@ -1242,7 +1346,7 @@
         S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label>${mIn('c_' + c.id, b.amounts[c.id])}`).join('');
 
     } else if (step === 'bills') {
-      body = `<p class="muted">Due days let the app warn you, plan each paycheck, and put bills on your calendar.</p>` + S.bills.map((x) => `<div class="card inset"><label class="f">Name</label><input type="text" name="bn_${x.id}" value="${esc(x.name)}" autocomplete="off"><div class="two"><div><label class="f">Amount</label>${mIn('ba_' + x.id, x.amount)}</div><div><label class="f">Due day</label><input type="number" min="1" max="31" name="bd_${x.id}" value="${x.day || ''}" placeholder="1 to 31"></div></div><label class="f">Category</label><select name="bc_${x.id}">${S.cats.map((c) => `<option value="${c.id}" ${x.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><button type="button" class="mt8 btn small danger" data-act="wizRmBill" data-id="${x.id}">Remove bill</button></div>`).join('') +
+      body = `<p class="muted">Due days let the app warn you, plan each paycheck, and put bills on your calendar.</p>` + S.bills.map((x) => `<div class="card inset"><label class="f">Name</label><input type="text" name="bn_${x.id}" value="${esc(x.name)}" autocomplete="off"><div class="two"><div><label class="f">Amount</label>${mIn('ba_' + x.id, x.amount)}</div><div><label class="f">Due day</label><input type="number" min="1" max="31" name="bd_${x.id}" value="${x.day || ''}" placeholder="1 to 31"></div></div><label class="f">Type</label><select name="bc_${x.id}">${billCatOpts(x.cat)}</select><button type="button" class="mt8 btn small danger" data-act="wizRmBill" data-id="${x.id}">Remove bill</button></div>`).join('') +
         `<button type="button" class="btn" data-act="wizAddBill">Add a bill</button><p class="muted small mt8">Put streaming, apps, and memberships under Subscriptions so the app can check on them. If a category budget is lower than its bills, it gets raised to cover them.</p>`;
     } else if (step === 'goals') {
       const g = S.goals;
@@ -1264,7 +1368,7 @@
   function wizSave(step, fd) {
     const b = budgetOf(), has = (k) => fd.get(k) !== null && String(fd.get(k)).trim() !== '';
     if (step === 'pay') {
-      const f = fd.get('freq') || 'biweekly', per = C.num(fd.get('per'));
+      const f = fd.get('freq') || 'biweekly', per = Math.abs(C.num(fd.get('per')));
       if (S.mode === 'summer') { S.budget.summer.freq = f; if (has('per')) S.budget.summer.pay = C.round2(per); }
       else { S.payFreq = f; if (has('per')) S.budget.school.income = C.round2(per * PER_MONTH[f]); }
     } else if (step === 'accounts') {
@@ -1284,21 +1388,21 @@
       if (fd.get('src') !== null) { S.autoBal = !!fd.get('auto'); if (S.autoBal) S.balSince = C.today(); }
     } else if (step === 'budget') {
       if (fd.get('fw') === null) return;
-      const fw = C.num(fd.get('fw')); S.budget.school.foodWeek = fw; S.budget.summer.foodWeek = fw;
+      const fw = C.num(fd.get('fw')); setFoodWeek('school', fw); setFoodWeek('summer', fw);
       const roll = !!fd.get('roll'); if (roll && !S.rollover) S.rollSince = C.weekStart(C.today()); S.rollover = roll;
-      S.cats.forEach((c) => { const v = fd.get('c_' + c.id); if (v === null) return; b.amounts[c.id] = C.num(v); if (!mahi()) S.budget.summer.amounts[c.id] = C.num(v); });
+      S.cats.forEach((c) => { const v = fd.get('c_' + c.id); if (v === null) return; b.amounts[c.id] = Math.abs(C.num(v)); if (!mahi()) S.budget.summer.amounts[c.id] = Math.abs(C.num(v)); });
     } else if (step === 'bills') {
       S.bills.forEach((x) => {
         if (fd.get('bn_' + x.id) === null) return;
-        x.name = String(fd.get('bn_' + x.id)).trim(); x.amount = C.round2(C.num(fd.get('ba_' + x.id)));
-        x.day = Math.max(0, Math.min(31, Math.round(C.num(fd.get('bd_' + x.id))))) || null; x.cat = fd.get('bc_' + x.id) || x.cat;
+        const was = x.name; x.name = String(fd.get('bn_' + x.id)).trim(); renameOwnCat(x, was); x.amount = C.round2(Math.abs(C.num(fd.get('ba_' + x.id))));
+        x.day = Math.max(0, Math.min(31, Math.round(C.num(fd.get('bd_' + x.id))))) || null;
+        const bc = fd.get('bc_' + x.id) || x.cat; x.cat = bc === '__new' ? (x.name ? newFixedCat(x.name) : x.cat) : bc;
       });
       S.bills = S.bills.filter((x) => x.name);
       // A category budget should never be lower than the bills that land in it.
-      const need = {}; S.bills.forEach((x) => { need[x.cat] = C.round2((need[x.cat] || 0) + x.amount); });
-      Object.keys(need).forEach((c) => { if (c !== 'other' && (b.amounts[c] || 0) < need[c]) { b.amounts[c] = need[c]; if (!mahi()) S.budget.summer.amounts[c] = need[c]; } });
+      coverBills();
     } else if (step === 'goals') {
-      Object.keys(b.savings).forEach((k) => { if (fd.get('sv_' + k) !== null) b.savings[k] = C.num(fd.get('sv_' + k)); });
+      Object.keys(b.savings).forEach((k) => { if (fd.get('sv_' + k) !== null) b.savings[k] = Math.abs(C.num(fd.get('sv_' + k))); });
       ['mom', 'ins', 'trip'].forEach((k) => { if (fd.get('gt_' + k) !== null) S.goals[k].target = Math.max(0, C.num(fd.get('gt_' + k))); });
       const d = fd.get('gd_ins'); if (d !== null) { S.goals.ins.due = d || ''; if (d && !S.goals.ins.start) S.goals.ins.start = C.addMonths(d, -6); }
       S.setupDone = true; S.setupV = 2;
@@ -1346,9 +1450,10 @@
     refundCame(fd) {
       const e = S.expenses.find((x) => x.id === fd.get('id')); if (!e) return;
       const amount = C.round2(C.num(fd.get('amount'))); if (!(amount > 0)) { toast('Enter the amount'); return; }
-      const r = { id: uid(), amount: -amount, cat: e.cat, note: 'Refund: ' + (e.note || catName(e.cat)), account: e.account, date: fd.get('date') || C.today(), paidFromSavings: e.paidFromSavings, household: e.household, forOther: '', takeout: false, source: 'manual' };
+      const r = Object.assign({ id: uid(), amount: -amount, cat: e.cat, note: 'Refund: ' + (e.note || catName(e.cat)), account: e.account, date: fd.get('date') || C.today(), takeout: false, source: 'manual' }, refundFlags(e));
       S.expenses.push(r); applyBal(r); e.refundPending = false; delete e.pendSince;
-      save(); closeSheet(); render(); toast(fm(amount) + ' refund saved');
+      const who = iouRefund(e, amount);
+      save(); closeSheet(); render(); toast(fm(amount) + ' refund saved' + who);
     },
     incomeFix(fd) {
       const mk = fd.get('mk'), raw = String(fd.get('amount') || '').trim();
@@ -1383,22 +1488,24 @@
       const amount = C.round2(C.num(fd.get('amount')));
       if (!(amount > 0)) { toast('Enter an amount'); return; }
       const id = fd.get('id'), cat = fd.get('cat') || 'other', refund = !!fd.get('refund');
-      const forOther = !refund && !!fd.get('forOther'), person = (fd.get('person') || '').trim();
+      const forOther = !!fd.get('forOther'), person = (fd.get('person') || '').trim();
       if (forOther && !person) { toast('Who was it for?'); return; }
       const old = id ? S.expenses.find((x) => x.id === id) : null;
       if (old && old.iouForgive && refund) { toast('A forgiven IOU cannot be a refund'); return; }
       const pend = !refund && !!fd.get('pending');
-      const rec = { amount: refund ? -amount : amount, refundPending: pend, pendSince: pend ? (old && old.refundPending && old.pendSince) || C.today() : undefined, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !fd.get('trip') && !!fd.get('oneTime'), fromTrip: !!fd.get('trip'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
+      const rec = { amount: refund ? -amount : amount, refundPending: pend, pendSince: pend ? (old && old.refundPending && old.pendSince) || C.today() : undefined, fromFund: cat === 'insurance' && (refund ? !!(old && old.fromFund) : !!fd.get('fromFund')), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !fd.get('trip') && !!fd.get('oneTime'), fromTrip: !!fd.get('trip'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
       let exp = old, msg = refund ? 'Refund saved' : 'Saved';
-      if (exp) { revertBal(exp); Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
+      if (exp) { revertBal(exp); if (exp.billCatWas && cat !== exp.cat) delete exp.billCatWas; Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
       applyBal(exp);
       if (ui.rcpt) { const id2 = exp.id, data = ui.rcpt; exp.receipt = true; V.putFile(id2, data).catch(() => toast('Could not save the photo')); }
       else if (ui.rcptDel && exp.receipt) { exp.receipt = false; V.delFile(exp.id); }
       ui.rcpt = null; ui.rcptDel = false;
       let iou = S.ious.find((i) => i.expenseId === exp.id);
-      if (forOther) {
+      // A refund for someone else's thing is not counted, and it never opens an IOU of its own.
+      if (forOther && refund) msg = 'Refund saved. If ' + person + ' owed you for it, update the IOU.';
+      if (forOther && !refund) {
         const reason = rec.note || catName(cat);
-        if (iou) { if (!iou.payments.length) { iou.person = person; iou.amount = amount; iou.date = rec.date; } iou.reason = reason; }
+        if (iou) { if (!iou.payments.length) { iou.person = person; iou.amount = C.round2(Math.max(0, amount - (iou.refunded || 0))); iou.date = rec.date; if (iou.refunded && !iou.forgiven) iou.settled = remaining(iou) <= 0.004; } iou.reason = reason; }
         else { S.ious.push({ id: uid(), person, dir: 'owedToMe', amount, reason, date: rec.date, payments: [], settled: false, expenseId: exp.id }); msg = 'Saved. IOU created for ' + person; }
       } else if (iou && !iou.payments.length) S.ious = S.ious.filter((i) => i !== iou);
       S.lastAccount = rec.account; ui.lastCat = cat;
@@ -1443,10 +1550,11 @@
       const name = (fd.get('name') || '').trim(), amount = C.round2(C.num(fd.get('amount')));
       if (!name || !(amount > 0)) { toast('Add a name and amount'); return; }
       const day = Math.max(0, Math.min(31, Math.round(C.num(fd.get('day'))))) || null;
-      const id = fd.get('id');
-      if (id) Object.assign(S.bills.find((b) => b.id === id), { name, amount, day, cat: fd.get('cat') });
-      else S.bills.push({ id: uid(), name, amount, day, cat: fd.get('cat') });
-      save(); closeSheet(); render();
+      const id = fd.get('id'), b = id ? S.bills.find((x) => x.id === id) : null; if (id && !b) { closeSheet(); return; }
+      let cat = fd.get('cat') || '__new'; if (cat === '__new') cat = newFixedCat(name);
+      if (b) { const was = b.name; Object.assign(b, { name, amount, day, cat }); renameOwnCat(b, was); } else S.bills.push({ id: uid(), name, amount, day, cat });
+      const up = coverBills();
+      save(); closeSheet(); render(); if (up) toast('Saved. Your monthly budget now includes it.');
     },
     acct(fd) {
       const name = (fd.get('name') || '').trim(), last4 = (fd.get('last4') || '').trim();
@@ -1476,9 +1584,13 @@
       const amount = C.round2(C.num(fd.get('amount'))), date = fd.get('date') || C.today();
       if (!(amount > 0)) { toast('Enter the amount'); return; }
       const p = payPlan(amount, date);
-      S.paychecks = S.paychecks || []; S.paychecks.push({ id: uid(), date, amount });
-      if (fd.get('toGoals')) p.goals.forEach((g) => { if (S.goals[g.k]) S.goals[g.k].contribs.push({ id: uid(), date, amount: g.v, note: 'From paycheck' }); });
-      if (fd.get('toChk')) { const a = S.accounts.find((x) => x.type === 'checking'); if (a) a.balance = C.round2((a.balance || 0) + amount); }
+      S.paychecks = S.paychecks || [];
+      const dup = S.paychecks.find((x) => C.cents(x.amount) === C.cents(amount) && Math.abs(C.daysBetween(x.date, date)) <= 3);
+      if (dup && !confirm('You already logged a ' + fm(dup.amount) + ' paycheck on ' + C.shortDate(dup.date) + '. Log this one too?')) return;
+      // The paycheck remembers what it added, so deleting it later undoes all of it.
+      const pc = { id: uid(), date, amount, v: 2, goals: [] }; S.paychecks.push(pc);
+      if (fd.get('toGoals')) p.goals.forEach((g) => { if (S.goals[g.k]) { const c = { id: uid(), date, amount: g.v, note: 'From paycheck', fromPay: pc.id }; S.goals[g.k].contribs.push(c); pc.goals.push(c.id); } });
+      if (fd.get('toChk')) { const a = S.accounts.find((x) => x.type === 'checking'); if (a) { a.balance = C.round2((a.balance || 0) + amount); pc.chk = a.id; } }
       save(); closeSheet(); render(); toast('Paycheck logged');
     },
     paycard(fd) {
@@ -1562,7 +1674,7 @@
     add() { addSheet(); },
     logGas() { addSheet(null, 'gas'); },
     moveLeftover(d) {
-      const lo = LO(), amt = leftoverOf(d.mk); if (!(amt > 0)) return;
+      const lo = LO(), amt = leftToMove(d.mk); if (!(amt > 0)) return;
       lo.moved[d.mk] = amt;
       S.goals.gen.contribs.push({ id: uid(), date: C.today(), amount: amt, note: 'Left over from ' + C.monthName(d.mk) });
       if (S.autoBal) {
@@ -1572,9 +1684,7 @@
       save(); render(); toast(fm(amt) + ' added to savings');
     },
     addFixed() {
-      const id = uid(), at = S.cats.findIndex((c) => c.kind === 'flex');
-      S.cats.splice(at < 0 ? S.cats.length : at, 0, { id, name: 'New bill', kind: 'fixed', custom: true });
-      ['school', 'summer'].forEach((m) => { S.budget[m].amounts[id] = 0; });
+      newFixedCat('New bill');
       save(); render();
       setTimeout(() => { const el = document.querySelector(`input[aria-label="New bill amount"]`); const nm = el && el.previousElementSibling && el.previousElementSibling.querySelector('input'); if (nm) { nm.focus(); nm.select(); } }, 50);
     },
@@ -1585,6 +1695,7 @@
       if (!confirm(n ? 'Remove ' + c.name + '? Its ' + n + ' purchase' + (n === 1 ? '' : 's') + ' will move to Other.' : 'Remove ' + c.name + '?')) return;
       S.expenses.forEach((e) => { if (e.cat === d.id) e.cat = 'other'; });
       S.rules.forEach((r) => { if (r.cat === d.id) r.cat = 'other'; });
+      S.bills.forEach((x) => { if (x.cat === d.id) x.cat = 'other'; });
       if (c.kind === 'fixed') ['school', 'summer'].forEach((m) => { delete S.budget[m].amounts[c.id]; });
       S.cats = S.cats.filter((x) => x !== c); save(); render();
     },
@@ -1638,7 +1749,7 @@
     },
     setupMahi() { setupForm(); },
     setupNew() {
-      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
+      S = blankKeep(S);
       save(); setupForm();
     },
     setupSkip() { wizForm(); S.setupDone = true; S.dismissed.v2 = true; save(); closeSheet(); render(); if (!S.tourDone) setTimeout(tour, 600); },
@@ -1677,7 +1788,7 @@
       const x = ui.fixOpts && ui.fixOpts[+d.i]; if (!x) return;
       const b = budgetOf(), wpm = 52 / 12;
       x.ch.forEach((c) => {
-        if (c.kind === 'food') b.foodWeek = c.to;
+        if (c.kind === 'food') setFoodWeek(S.mode, c.to);
         else if (c.kind === 'cat') b.amounts[c.id] = c.to;
         else b.savings[c.id] = c.to;
       });
@@ -1716,12 +1827,21 @@
       if (S.autoBal) { const chk = S.accounts.find((a) => a.type === 'checking'), sav = S.accounts.find((a) => a.type === 'savings'); if (chk && sav) { chk.balance = C.round2((chk.balance || 0) + amt); sav.balance = C.round2((sav.balance || 0) - amt); } }
       save(); render(); toast(fm(amt) + ' pulled from savings for ' + C.monthName(d.mk));
     },
+    delPay(d) {
+      const pc = (S.paychecks || []).find((x) => x.id === d.id); if (!pc) return;
+      if (!confirm('Delete the ' + fm(pc.amount) + ' paycheck from ' + C.shortDate(pc.date) + '?')) return;
+      S.paychecks = S.paychecks.filter((x) => x !== pc);
+      Object.values(S.goals).forEach((g) => { g.contribs = (g.contribs || []).filter((c) => !(c.fromPay === pc.id || (pc.goals || []).includes(c.id))); });
+      if (pc.chk) { const a = S.accounts.find((x) => x.id === pc.chk); if (a) a.balance = C.round2((a.balance || 0) - pc.amount); }
+      save(); render(); toast(pc.v ? 'Paycheck deleted' : 'Paycheck deleted. If it added to your goals or checking, fix those by hand.');
+    },
     toggleTimeOff(d, el) { S.timeOffOn = el.checked; save(); render(); },
     toggleShort(d, el) { S.shortFromSav = el.checked; save(); render(); },
     tour() { ui.tourI = 0; tour(); },
     tourNext() { ui.tourI = (ui.tourI || 0) + 1; tour(); },
     tourEnd() { ui.tourI = 0; S.tourDone = true; save(); closeSheet(); },
     todoLater(d) { S.dismissed['todo' + d.k + C.today()] = true; save(); render(); },
+    todoSkip(d) { S.dismissed['todo' + d.k] = true; save(); render(); toast('Got it. The app will look for your next payday.'); },
     balDone() { S.balCheck = C.monthKey(C.today()); save(); render(); toast('Nice. Fix any balance in Cards and balances if it was off.'); },
     refundCame(d) {
       const e = S.expenses.find((x) => x.id === d.id); if (!e) return;
@@ -1771,14 +1891,21 @@
       const r = remaining(i); if (r > 0) i.payments.push({ date: C.today(), amount: r });
       i.settled = true; save(); render(); toast('Settled');
     },
-    delIou(d) { if (confirm('Delete this IOU?')) { S.ious = S.ious.filter((x) => x.id !== d.id); save(); render(); } },
+    delIou(d) {
+      const i = S.ious.find((x) => x.id === d.id); if (!i) return;
+      // An IOU from a purchase: with the IOU gone, that purchase is yours, so it counts again instead of vanishing.
+      const e = i.expenseId ? S.expenses.find((x) => x.id === i.expenseId && x.forOther) : null;
+      if (!confirm(e ? 'Delete this IOU? The purchase it came from will count as your own spending.' : 'Delete this IOU?')) return;
+      if (e) e.forOther = '';
+      S.ious = S.ious.filter((x) => x !== i); save(); render();
+    },
     // goals
     contrib(d) {
       openSheet(`<h2>Add money</h2><p class="muted">${esc(S.goals[d.k].name)}</p><form data-form="contrib"><input type="hidden" name="k" value="${d.k}"><label class="f">Amount</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional"><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
     },
     logBonus() {
       const gl = Object.keys(S.goals).map((k) => `<option value="${k}" ${k === (ui.bonusGoal || 'gen') ? 'selected' : ''}>${esc(S.goals[k].name)}</option>`).join('');
-      openSheet(`<h2>Log bonus</h2><p class="muted">Tips, gifts, and money from family go straight to a savings goal. It is never counted as income.</p><form data-form="bonus"><label class="f">Amount</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">From</label><div class="chips">${['Tips', 'Dad', 'Other'].map((x, i) => `<input type="radio" id="bs_${i}" name="src" value="${x}" ${i === 0 ? 'checked' : ''}><label for="bs_${i}">${x}</label>`).join('')}</div><label class="f">Send to goal</label><select name="k">${gl}</select><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
+      openSheet(`<h2>Log bonus</h2><p class="muted">Tips, gifts, and money from family go straight to a savings goal. It is never counted as income.</p><form data-form="bonus"><label class="f">Amount</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">From</label><div class="chips">${(mahi() ? ['Tips', 'Dad', 'Other'] : ['Tips', 'Gift', 'Family', 'Other']).map((x, i) => `<input type="radio" id="bs_${i}" name="src" value="${x}" ${i === 0 ? 'checked' : ''}><label for="bs_${i}">${x}</label>`).join('')}</div><label class="f">Send to goal</label><select name="k">${gl}</select><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
       const a = $('#sheet input[name=amount]'); if (a) setTimeout(() => a.focus(), 50);
     },
     goalHist(d) {
@@ -1793,10 +1920,20 @@
     insNext() { const g = S.goals.ins; if (!g.due) return; g.start = g.due; g.due = C.addMonths(g.due, 6); save(); render(); toast('Next cycle started'); },
     // bills
     billPaid(d) {
-      const mk = ui.bmk || C.monthKey(C.today()), b = S.bills.find((x) => x.id === d.id);
-      if (billPaid(b, mk)) S.expenses = S.expenses.filter((e) => { const hit = e.billId === b.id && C.monthKey(e.date) === mk; if (hit) revertBal(e); return !hit; });
-      else { const e = { id: uid(), amount: b.amount, cat: b.cat, note: b.name, account: S.lastAccount, date: mk === C.monthKey(C.today()) ? C.today() : mk + '-01', paidFromSavings: false, forOther: '', takeout: false, billId: b.id, source: 'bill' }; S.expenses.push(e); applyBal(e); }
-      save(); render();
+      const mk = ui.bmk || C.monthKey(C.today()), b = S.bills.find((x) => x.id === d.id); if (!b) return;
+      let msg = '';
+      if (billPaid(b, mk)) S.expenses = S.expenses.filter((e) => {
+        const hit = e.billId === b.id && C.monthKey(e.date) === mk; if (!hit) return true;
+        // A bank charge that was matched to this bill stays. It just stops being the bill.
+        if (e.source !== 'bill') { delete e.billId; if (e.billCatWas) { e.cat = e.billCatWas; delete e.billCatWas; e.takeout = e.cat === 'food' && !e.household; } return true; }
+        revertBal(e); return false;
+      });
+      else {
+        const m = chargeFor(b, mk);
+        if (m) { m.billId = b.id; if (m.cat !== b.cat) { m.billCatWas = m.cat; m.cat = b.cat; } m.takeout = false; msg = 'Matched to the ' + fm(m.amount) + ' charge on ' + C.shortDate(m.date) + ', so it only counts once'; }
+        else { const e = { id: uid(), amount: b.amount, cat: b.cat, note: b.name, account: S.lastAccount, date: mk === C.monthKey(C.today()) ? C.today() : mk + '-01', paidFromSavings: false, forOther: '', takeout: false, billId: b.id, source: 'bill' }; S.expenses.push(e); applyBal(e); }
+      }
+      save(); render(); if (msg) toast(msg);
     },
     addBill() { billSheet(); },
     editBill(d) { billSheet(d.id); },
@@ -1814,18 +1951,21 @@
     pickImg() { $('#imgfile').click(); },
     impCancel() { ui.imp = null; render(); },
     impSave() {
-      const acct = $('#impacct').value, im = ui.imp; let n = 0;
+      const acct = $('#impacct').value, im = ui.imp; let n = 0, linked = 0;
       im.items.forEach((x) => {
         if (!x.on || !(x.amount > 0)) return;
-        const hh = x.cat === '__hh', fund = x.cat === '__insfund' && !x.refund;
+        const hh = x.cat === '__hh', fund = x.cat === '__insfund';
         const cat = hh ? 'other' : x.cat === '__insfund' ? 'insurance' : x.cat;
         const e = { id: uid(), amount: x.refund ? -C.round2(x.amount) : C.round2(x.amount), cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, fromFund: fund, forOther: '', takeout: !x.refund && cat === 'food', source: im.kind };
+        // A refund that matches a return you are waiting on goes back where that purchase came from.
+        const w = x.refund ? S.expenses.find((p) => p.refundPending && C.cents(p.amount) === C.cents(-e.amount)) : null;
+        if (w) { Object.assign(e, refundFlags(w), { cat: w.cat, takeout: false }); w.refundPending = false; delete w.pendSince; iouRefund(w, -e.amount); }
+        else if (!x.refund && !hh && !fund) { const bl = billFor(e); if (bl) { e.billId = bl.id; if (e.cat !== bl.cat) { e.billCatWas = e.cat; e.cat = bl.cat; } e.takeout = false; linked++; } }
         S.expenses.push(e); applyBal(e);
-        if (x.refund) { const w = S.expenses.find((p) => p.refundPending && C.cents(p.amount) === C.cents(-e.amount)); if (w) { w.refundPending = false; delete w.pendSince; } }
         n++;
       });
       S.lastImport = C.today();
-      S.lastAccount = acct; ui.imp = null; save(); render(); toast(n + ' saved');
+      S.lastAccount = acct; ui.imp = null; save(); render(); toast(n + ' saved' + (linked ? ', ' + linked + ' matched to your bills' : ''));
     },
     // security
     lockNow() { lock(); },
@@ -1849,7 +1989,7 @@
     pickBackup() { $('#bkfile').click(); },
     blankNow() {
       if (!confirm('Replace the preloaded budget, bills, goals, and rules with blank ones?')) return;
-      S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, setupDone: S.setupDone, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
+      S = blankKeep(S);
       save(); ui.more = null; ui.tab = 'home'; render(); toast('Blank setup ready. Set your budget in More.');
     },
     erase() {
@@ -1861,7 +2001,7 @@
 
   function billSheet(id) {
     const b = id ? S.bills.find((x) => x.id === id) : null;
-    openSheet(`<h2>${b ? 'Edit bill' : 'Add a bill'}</h2><form data-form="bill"><input type="hidden" name="id" value="${id || ''}"><label class="f">Name</label><input type="text" name="name" value="${esc(b ? b.name : '')}" required><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${b ? b.amount : ''}" required><label class="f">Due day of the month</label><input type="number" name="day" min="1" max="31" value="${b && b.day ? b.day : ''}" placeholder="1 to 31"><label class="f">Category</label><select name="cat">${S.cats.map((c) => `<option value="${c.id}" ${b && b.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${b ? `<button class="mt btn danger" type="button" data-act="delBill" data-id="${b.id}">Delete bill</button>` : ''}</form>`);
+    openSheet(`<h2>${b ? 'Edit bill' : 'Add a bill'}</h2><form data-form="bill"><input type="hidden" name="id" value="${id || ''}"><label class="f">Name</label><input type="text" name="name" value="${esc(b ? b.name : '')}" required><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${b ? b.amount : ''}" required><label class="f">Due day of the month</label><input type="number" name="day" min="1" max="31" value="${b && b.day ? b.day : ''}" placeholder="1 to 31"><label class="f">Type</label><select name="cat">${billCatOpts(b ? b.cat : '__new')}</select><p class="muted small">Pick Subscriptions for streaming, apps, and memberships. Its own bill type adds it to your monthly bills under its name.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>${b ? `<button class="mt btn danger" type="button" data-act="delBill" data-id="${b.id}">Delete bill</button>` : ''}</form>`);
   }
   function acctSheet(id) {
     const a = id ? S.accounts.find((x) => x.id === id) : null;
@@ -1904,7 +2044,12 @@
   document.addEventListener('change', async (ev) => {
     const el = ev.target;
     if (el.dataset && el.dataset.path) {
-      setPath(el.dataset.path, el.dataset.t === 'n' ? C.round2(C.num(el.value)) : el.value);
+      const path = el.dataset.path, fwm = path.match(/^budget\.(school|summer)\.foodWeek$/);
+      // A cleared month box keeps the month it had. Budget numbers are never negative, only balances can be.
+      if (path === 'leftover.start' && !/^\d{4}-\d{2}$/.test(el.value)) { el.value = LO().start; return; }
+      if (fwm) setFoodWeek(fwm[1], el.value);
+      else if (el.dataset.t === 'n') { const n = C.round2(C.num(el.value)); setPath(path, /^accounts\./.test(path) ? n : Math.abs(n)); }
+      else setPath(path, el.value);
       save();
       if (el.dataset.re) { if (el.tagName === 'SELECT') render(); else setTimeout(renderWhenIdle, 0); }
       return;
