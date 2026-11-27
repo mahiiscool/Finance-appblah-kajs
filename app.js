@@ -346,7 +346,7 @@
     }
     const tabs = [['home', 'Home', ICON.home], ['budget', 'Budget', ICON.chart], ['add'], ['ious', 'IOUs', ICON.people], ['goals', 'Goals', ICON.target], ['more', 'More', ICON.more]];
     $('#app').innerHTML = `<div class="screen">${body}</div>` +
-      `<nav class="tabbar">${tabs.map((t) => t[0] === 'add' ? '<button class="addtab" data-act="add" aria-label="Add expense"><span class="plus">+</span><span>Add</span></button>' : `<button class="${ui.tab === t[0] ? 'on' : ''}" data-act="tab" data-t="${t[0]}">${t[2]}<span>${t[1]}</span></button>`).join('')}</nav>`;
+      `<nav class="tabbar">${tabs.map((t) => t[0] === 'add' ? '<button class="addtab" data-act="add" aria-label="Add expense"><span class="plus">+</span><span>Add</span></button>' : `<button class="${ui.tab === t[0] ? 'on' : ''}" data-act="tab" data-t="${t[0]}">${t[0] === 'more' && logUnread() ? '<i class="ndot"></i>' : ''}${t[2]}<span>${t[1]}</span></button>`).join('')}</nav>`;
     applyWidths();
     window.scrollTo(0, y);
   }
@@ -517,6 +517,30 @@
   }
 
   // ---------- MORE ----------
+  // ---------- what's new ----------
+  // The list lives in changelog.json in the repo, so every push updates it without changing the app code.
+  let LOG = null, logBusy = false;
+  const logTop = () => (LOG && LOG.length ? Math.max(...LOG.map((x) => x.v || 0)) : 0);
+  const logUnread = () => !!(S && LOG && logTop() > (S.logSeen || 0));
+  async function loadLog(rerender) {
+    if (logBusy) return; logBusy = true;
+    try {
+      let res;
+      try { res = await fetch('changelog.json', { cache: 'no-store' }); } catch (e) { res = await caches.match('changelog.json'); }
+      if (res && res.ok) { const j = await res.json(); if (Array.isArray(j)) { const had = logTop(); LOG = j; if (rerender || logTop() !== had) render(); } }
+    } catch (e) {}
+    logBusy = false;
+  }
+  const LOG_TYPES = { new: ['New', 'g'], fix: ['Fix', 'y'], change: ['Change', 'b'] };
+  function LogView() {
+    let h = back() + `<h1 class="title">What's new</h1><div class="sub">Every update, newest first</div>`;
+    if (!LOG) { loadLog(true); return h + card('', '<p class="muted">Loading the list. You need internet the first time.</p>'); }
+    const seen = S.logSeen || 0;
+    h += LOG.slice().sort((a, b) => (b.v || 0) - (a.v || 0)).map((x) => card(C.longDate(x.date), `<p class="med">${esc(x.title || '')}${(x.v || 0) > seen ? '<span class="pill b">New</span>' : ''}</p>` +
+      (x.items || []).map((i) => { const t = LOG_TYPES[i.type] || LOG_TYPES.change; return `<div class="logrow"><span class="pill ${t[1]}">${t[0]}</span><span>${esc(i.text || '')}</span></div>`; }).join(''))).join('');
+    if (logTop() > seen) { S.logSeen = logTop(); save(); }
+    return h;
+  }
   function More() {
     const v = ui.more;
     if (v === 'bills') return BillsView();
@@ -529,8 +553,9 @@
     if (v === 'rules') return RulesView();
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
-    const rows = [['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
-    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="paycheck">I got paid: plan this paycheck</button><button class="mt btn" data-act="quickSetup">Run setup again</button>');
+    if (v === 'log') return LogView();
+    const rows = [['log', "What's new"], ['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
+    return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}${r[0] === 'log' && logUnread() ? '<span class="pill b">New</span>' : ''}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="paycheck">I got paid: plan this paycheck</button><button class="mt btn" data-act="quickSetup">Run setup again</button>');
   }
 
   function BillsView() {
@@ -1387,7 +1412,7 @@
     quickSetup() { setupStart(); },
     dismissBackup() { S.dismissed['bk' + C.today()] = true; save(); render(); },
     dismissSun() { S.dismissed['sun' + C.today()] = true; save(); render(); },
-    openMore(d) { ui.tab = 'more'; ui.more = d.v; ui.imp = null; render(); window.scrollTo(0, 0); if (d.v === 'security') fillFaceBox(); if (d.v === 'afford') setTimeout(() => { const p = $('input[name=price]'); if (p) p.focus(); }, 50); },
+    openMore(d) { if (d.v === 'log') loadLog(true); ui.tab = 'more'; ui.more = d.v; ui.imp = null; render(); window.scrollTo(0, 0); if (d.v === 'security') fillFaceBox(); if (d.v === 'afford') setTimeout(() => { const p = $('input[name=price]'); if (p) p.focus(); }, 50); },
     moreBack() { ui.more = null; ui.imp = null; render(); },
     // IOUs
     addIou() {
@@ -1587,6 +1612,7 @@
     addSpendTypes();
     momStrict();
     overCarryOn();
+    loadLog();
     LO();
     try {
       const up = sessionStorage.getItem('moneyUpdated');

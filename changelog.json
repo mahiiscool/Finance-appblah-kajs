@@ -1,0 +1,162 @@
+[
+  {
+    "v": 23,
+    "date": "2026-11-27",
+    "title": "What's new page",
+    "items": [
+      { "type": "new", "text": "Added this What's new page under More. It lists every update, new feature and fix, newest first." },
+      { "type": "new", "text": "A blue dot shows on the More tab and the What's new row when there is something you have not read yet." },
+      { "type": "new", "text": "The list loads fresh from GitHub each time you open it, so it is always current. Offline, it shows the last copy it saw." }
+    ]
+  },
+  {
+    "v": 22,
+    "date": "2026-11-26",
+    "title": "Update button fix",
+    "items": [
+      { "type": "fix", "text": "Check for updates no longer flashes and throws you back to Home. It only reloads when there really is a new version." },
+      { "type": "fix", "text": "If you already have the newest version, it just tells you so." },
+      { "type": "change", "text": "After an update and your PIN, you land back on Settings with a message saying it worked." }
+    ]
+  },
+  {
+    "v": 21,
+    "date": "2026-11-26",
+    "title": "Cover a bad week with savings",
+    "items": [
+      { "type": "new", "text": "When you blow way past your weekly money, a Cover with savings button shows on the Home spending card." },
+      { "type": "new", "text": "It fills in the amount needed to get back on track. You can change it. It comes out of this month's savings instead of your next weeks." },
+      { "type": "new", "text": "Covered money shows as a note on the card, and you can undo a cover." }
+    ]
+  },
+  {
+    "v": 20,
+    "date": "2026-11-26",
+    "title": "Overspending carries to next week",
+    "items": [
+      { "type": "new", "text": "If you go over your weekly money, next week starts with that much less. Example: spend 80 of 60, next week is 40." },
+      { "type": "new", "text": "A big overspend keeps carrying until it is paid back." },
+      { "type": "change", "text": "On by default. Turn it off in Budget and income, under Rollover." },
+      { "type": "change", "text": "Counting started the week of Nov 22, so older weeks do not count against you." }
+    ]
+  },
+  {
+    "v": 19,
+    "date": "2026-11-20",
+    "title": "Gas savings",
+    "items": [
+      { "type": "new", "text": "The gas card on Home shows the gas money you did not use going to savings at the end of the month." }
+    ]
+  },
+  {
+    "v": 18,
+    "date": "2026-11-20",
+    "title": "Mom payback and yearly savings",
+    "items": [
+      { "type": "change", "text": "Mom payback is now a strict 150 a month bill." },
+      { "type": "new", "text": "Whatever is left at the end of each month counts as saved, with a running total for the year." }
+    ]
+  },
+  {
+    "v": 17,
+    "date": "2026-11-20",
+    "title": "Spending types and gas tracker",
+    "items": [
+      { "type": "new", "text": "Your weekly money is split into types like Food, Fun and going out, and Shopping, so you can see where it went." },
+      { "type": "new", "text": "Added a monthly gas tracker on Home with a Log a fill up button." }
+    ]
+  },
+  {
+    "v": 16,
+    "date": "2026-11-20",
+    "title": "One weekly limit",
+    "items": [
+      { "type": "change", "text": "All non bill spending now shares one weekly limit of 60 instead of separate monthly amounts." },
+      { "type": "change", "text": "Weekly spending money is now the main number on Home." }
+    ]
+  },
+  {
+    "v": 15,
+    "date": "2026-11-20",
+    "title": "Budget updates",
+    "items": [
+      { "type": "new", "text": "When a paycheck falls short of the plan, the app offers fixes for future checks." },
+      { "type": "change", "text": "Removed Dad's payment from the budget. Old history stays." },
+      { "type": "change", "text": "Updated the monthly budget numbers without touching any saved data." }
+    ]
+  },
+  {
+    "v": 14,
+    "date": "2026-11-20",
+    "title": "Big feature drop",
+    "items": [
+      { "type": "new", "text": "Automatic balances: logging a purchase updates the card or account it was on." },
+      { "type": "new", "text": "Spending trends, a paycheck planner, and a subscription review reminder." },
+      { "type": "new", "text": "Bill reminders you can add to your phone calendar." },
+      { "type": "new", "text": "Rollover of unspent weekly money, search, and receipt photos." },
+      { "type": "new", "text": "Full step by step setup." }
+    ]
+  },
+  {
+    "v": 13,
+    "date": "2026-11-20",
+    "title": "Reports",
+    "items": [
+      { "type": "new", "text": "Weekly and monthly reports you can share or export as a CSV." }
+    ]
+  },
+  {
+    "v": 12,
+    "date": "2026-11-20",
+    "title": "Layout and bug fixes",
+    "items": [
+      { "type": "fix", "text": "Fixed parts of the screen overlapping and styles that were being blocked." },
+      { "type": "change", "text": "Moved Add into the bottom tab bar." },
+      { "type": "fix", "text": "Number boxes keep focus when you move between them." },
+      { "type": "fix", "text": "Pop up sheets work at large text sizes." },
+      { "type": "change", "text": "Settling IOUs and deleting things now asks you to confirm." },
+      { "type": "fix", "text": "Settings stay put on the blank setup, and button text is readable in light mode." }
+    ]
+  },
+  {
+    "v": 11,
+    "date": "2026-11-20",
+    "title": "Savings and cards in setup",
+    "items": [
+      { "type": "new", "text": "Setup asks for your savings and card balances." },
+      { "type": "new", "text": "You can pay cards from savings." }
+    ]
+  },
+  {
+    "v": 10,
+    "date": "2026-11-20",
+    "title": "PIN and setup",
+    "items": [
+      { "type": "change", "text": "Switched to a 6 digit PIN that unlocks as soon as you type the last digit." },
+      { "type": "change", "text": "The PIN is now optional." },
+      { "type": "new", "text": "Added quick setup and a stronger reminder to back up." }
+    ]
+  },
+  {
+    "v": 9,
+    "date": "2026-11-20",
+    "title": "Looks and updates",
+    "items": [
+      { "type": "new", "text": "Text size slider and color themes." },
+      { "type": "new", "text": "Check for updates button, and the app now grabs new versions from the internet first." }
+    ]
+  },
+  {
+    "v": 1,
+    "date": "2026-11-20",
+    "title": "First version",
+    "items": [
+      { "type": "new", "text": "Quick add, weekly and monthly budget views, history, recurring bills, and card warnings." },
+      { "type": "new", "text": "IOUs with partial payments, and savings goals including the insurance fund." },
+      { "type": "new", "text": "CSV and screenshot import with category rules." },
+      { "type": "new", "text": "Everything is encrypted on your phone, with auto lock, optional Face ID, and encrypted backups." },
+      { "type": "new", "text": "Can I afford this checker, monthly recap, and a Sunday review." },
+      { "type": "new", "text": "I'm not Mahi button for a blank setup anyone can use." }
+    ]
+  }
+]
