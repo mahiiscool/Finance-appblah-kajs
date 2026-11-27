@@ -37,7 +37,7 @@
   function defaultState() {
     const amounts = { gas: 150, insurance: 200, flexpay: 53.66, dad: 136.82, phone: 54, gym: 25, haircut: 42, subs: 41.99, food: 0, fun: 0, shop: 0, amazon: 0, other: 0 };
     return {
-      v: 1, persona: 'mahi', mode: 'school',
+      v: 1, persona: 'mahi', mode: 'school', extras: {}, oil: { cars: [], logs: [] },
       cats: [
         { id: 'gas', name: 'Gas', kind: 'fixed' }, { id: 'insurance', name: 'Car insurance', kind: 'fixed' },
         { id: 'flexpay', name: 'Flex pay', kind: 'fixed' }, { id: 'dad', name: "Dad's payment", kind: 'fixed' },
@@ -105,7 +105,7 @@
   }
 
   // Switching to a blank budget keeps everything you logged. Only the budget, bills, preloaded rules, and goal targets start over.
-  const KEEP = ['expenses', 'ious', 'accounts', 'paychecks', 'transfers', 'covers', 'pulled', 'incomeFix', 'leftover', 'lastBackup', 'lastImport', 'csvMap', 'setupDone', 'paySource', 'lastAccount', 'dismissed', 'tourDone', 'logSeen', 'autoBal', 'balSince', 'balCheck', 'poolSpend', 'spendTypes', 'overCarryInit', 'overCarry', 'overSince', 'rollover', 'rollSince', 'overSettle', 'shortFromSav'];
+  const KEEP = ['expenses', 'ious', 'accounts', 'paychecks', 'transfers', 'covers', 'pulled', 'incomeFix', 'leftover', 'lastBackup', 'lastImport', 'csvMap', 'setupDone', 'paySource', 'lastAccount', 'dismissed', 'tourDone', 'logSeen', 'autoBal', 'balSince', 'balCheck', 'poolSpend', 'spendTypes', 'overCarryInit', 'overCarry', 'overSince', 'rollover', 'rollSince', 'overSettle', 'shortFromSav', 'extras', 'oil'];
   function blankKeep(old) {
     const s = blankState(), pre = defaultState().rules.map((r) => r.match + '|' + r.cat);
     KEEP.forEach((k) => { if (old[k] !== undefined) s[k] = old[k]; });
@@ -561,6 +561,7 @@
     // back up, at least once a week
     const lb = S.lastBackup;
     if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7)) add('bk', lb ? `It has been ${C.daysBetween(lb, t)} days since your last backup. Your data only lives on this phone, so save a backup somewhere safe, like iCloud Drive or Google Drive.` : 'You have not backed up yet. Your data only lives on this phone, so save a backup somewhere safe, like iCloud Drive or Google Drive.', 'exportBackup', 'Back up now', {}, lb ? 'y' : 'r');
+    oilTodo(add);
     // subscriptions to look over
     const sd = subsDue();
     if (sd.length) add('subs' + mk, `${sd.length} subscription${sd.length === 1 ? '' : 's'} to look over: ${esc(sd.slice(0, 3).map((x) => x.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?`, 'openMore', 'Review', { v: 'bills' });
@@ -851,6 +852,7 @@
     ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works. A new weekly amount starts this week, and past weeks keep what they had.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
     ['Updates', 'The app looks for a new version by itself whenever you open it. When one is ready, it asks if you want to update. Tap Update, or Not now to wait. Your data is not touched. You can also check by hand in Settings.', [['Open Settings', 'settings', {}]]],
     ['Look and feel', 'In Settings you can pick a theme, a font, and the text size. They only change this phone, never your data.', [['Open Settings', 'settings', {}]]],
+    ['Extras', 'Settings has an Extras card with optional tools you can switch on. Oil top offs reminds you to check the oil on a schedule you choose, logs each time you add some, and graphs how fast your car uses it. It works for any car, in quarts or liters, miles or kilometers. It shows up in More once it is on, and it is included in your backup.', [['Open Settings', 'settings', {}]]],
     ['Back up', 'Your data only lives on this phone. Back up every week and save the file somewhere safe, like iCloud Drive or Google Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
     ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
   ];
@@ -885,7 +887,9 @@
     if (v === 'bank') return BankView();
     if (v === 'log') return LogView();
     if (v === 'guide') return GuideView();
+    if (v === 'oil' && extraOn('oil')) return OilView();
     const rows = [['guide', 'How to use this app'], ['log', "What's new"], ['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
+    if (extraOn('oil')) rows.splice(rows.length - 2, 0, ['oil', 'Oil top offs']);
     return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}${r[0] === 'log' && logUnread() ? '<span class="pill b">New</span>' : ''}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="paycheck">I got paid: plan this paycheck</button><button class="mt btn" data-act="quickSetup">Run setup again</button>');
   }
 
@@ -1214,6 +1218,7 @@
 
   function SecurityView() {
     return back() + `<h1 class="title">Settings</h1><div class="sub">Your data never leaves this device</div>` +
+      card('Extras', `<p class="muted small">Optional tools. Turn on only what you want. Turning one off hides it and keeps your entries.</p>` + EXTRAS.map((x) => `<label class="item row check"><input type="checkbox" data-act="toggleExtra" data-id="${x[0]}" ${extraOn(x[0]) ? 'checked' : ''}><span><span class="t">${x[1]}</span><br><span class="muted small">${x[2]}</span></span></label>`).join('')) +
       card('Font', `<div class="chips">${FONTS.map((f) => `<label class="${getFont() === f[0] ? 'on' : ''}"><button type="button" class="tbtn fb-${f[0]}" data-act="setFont" data-v="${f[0]}">${f[1]}</button></label>`).join('')}</div><p class="muted small mt8">Uses fonts already on your phone, so they can look a little different on iPhone and Android. Only changes this phone.</p>`) +
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
       card('App updates', `<p class="muted small">The app also looks for updates by itself when you open it. This pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
@@ -1336,8 +1341,8 @@
   }
   const acctBal = (type) => { const a = S.accounts.find((x) => x.type === type); return a ? a.balance : 0; };
   const setupForm = () => wizShow('pay');
-  const WIZ = ['pay', 'accounts', 'budget', 'bills', 'goals', 'done'];
-  const WIZT = { pay: 'Your pay', accounts: 'Accounts and cards', budget: 'Spending plan', bills: 'Recurring bills', goals: 'Savings goals', done: 'Almost done' };
+  const WIZ = ['pay', 'accounts', 'budget', 'bills', 'goals', 'extras', 'done'];
+  const WIZT = { pay: 'Your pay', accounts: 'Accounts and cards', budget: 'Spending plan', bills: 'Recurring bills', goals: 'Savings goals', extras: 'Extras', done: 'Almost done' };
   const mIn = (name, val, ph) => `<input type="text" inputmode="decimal" name="${name}" value="${val ? val : ''}" placeholder="${ph || '0'}" autocomplete="off">`;
   function wizShow(step) {
     ui.wiz = step;
@@ -1366,6 +1371,8 @@
         `<label class="f">${esc(g.mom.name)}: total you still owe${me ? '' : ' someone, if any'}</label>${mIn('gt_mom', g.mom.target)}` +
         `<label class="f">${esc(g.ins.name)}: amount of the bill</label>${mIn('gt_ins', g.ins.target)}<label class="f">${esc(g.ins.name)}: next due date</label><input type="date" name="gd_ins" value="${g.ins.due || ''}">` +
         `<label class="f">${esc(g.trip.name)}: target</label>${mIn('gt_trip', g.trip.target)}`;
+    } else if (step === 'extras') {
+      body = `<p class="muted">Optional. You can change this any time in Settings, under Extras.</p><input type="hidden" name="ex" value="1"><label class="item row check"><input type="checkbox" name="oil" ${extraOn('oil') ? 'checked' : ''}><span><span class="t">Track my car's oil use</span><br><span class="muted small">Reminds you to check the oil, logs each top off, and graphs how fast your car uses it. Works for any car. You add your car after setup.</span></span></label>`;
     } else {
       const inc = incomeOf(S.mode), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv), gaps = setupGaps();
       body = `<div class="card inset"><div class="row"><span>Monthly income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending plan</span><b>${fm(sp)}</b></div><div class="row"><span>Savings plan</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Left over to savings'}</span><b class="${left < 0 ? 'r' : 'g'}">${fm(left)}</b></div></div>` +
@@ -1418,6 +1425,9 @@
       ['mom', 'ins', 'trip'].forEach((k) => { if (fd.get('gt_' + k) !== null) S.goals[k].target = Math.max(0, C.num(fd.get('gt_' + k))); });
       const d = fd.get('gd_ins'); if (d !== null) { S.goals.ins.due = d || ''; if (d && !S.goals.ins.start) S.goals.ins.start = C.addMonths(d, -6); }
       S.setupDone = true; S.setupV = 2;
+    } else if (step === 'extras') {
+      if (fd.get('ex') === null) return;
+      extrasInit(); S.extras.oil = !!fd.get('oil');
     }
   }
   const wizForm = () => { const f = $('#sheet form[data-form=wiz]'); if (f) wizSave(ui.wiz, new FormData(f)); };
@@ -2129,6 +2139,7 @@
     fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null;
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* not supported */ }
     if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
+    extrasInit();
     applyBudgetNov2026();
     removeDadPayment();
     poolSpending();
@@ -2307,6 +2318,285 @@
   applyTheme(getTheme());
   applyFont(getFont());
   applyScale(getScale());
+
+  // ---------- extras: optional tools you switch on in Settings ----------
+  const EXTRAS = [['oil', 'Oil top offs', 'Reminds you to check the oil, logs what you add, and graphs how fast each car uses it.']];
+  const extraOn = (id) => !!(S && S.extras && S.extras[id]);
+  // Safe to run any number of times. Older saved data has no extras yet, so this adds empty ones.
+  function extrasInit() {
+    if (!S.extras || typeof S.extras !== 'object') S.extras = {};
+    if (!S.oil || typeof S.oil !== 'object') S.oil = { cars: [], logs: [] };
+    if (!Array.isArray(S.oil.cars)) S.oil.cars = [];
+    if (!Array.isArray(S.oil.logs)) S.oil.logs = [];
+  }
+  actions.toggleExtra = (d, el) => {
+    extrasInit();
+    const on = !!(el && el.checked), x = EXTRAS.find((e) => e[0] === d.id); if (!x) return;
+    S.extras[d.id] = on; save();
+    if (!on && ui.more === d.id) ui.more = null;
+    render(); if (ui.more === 'security') fillFaceBox();
+    toast(on ? x[1] + ' is on. Open More to set it up.' : x[1] + ' is off. Your entries are kept.');
+  };
+
+  // ----- oil: units, helpers -----
+  const OIL_VOL = { qt: ['Quarts', 'qt', 946.353], l: ['Liters', 'L', 1000], oz: ['Fluid ounces', 'oz', 29.5735], ml: ['Milliliters', 'ml', 1] };
+  const OIL_KIND = { add: 'Added oil', check: 'Checked, level fine', change: 'Oil change', start: 'Starting point', odo: 'Odometer reading' };
+  const OIL_LEVEL = { below: 'Below the low mark', between: 'Between the marks', full: 'Full' };
+  const oilCar = (id) => S.oil.cars.find((c) => c.id === id);
+  const oilToMl = (v, car) => v * OIL_VOL[car.vol][2];
+  const oilVolN = (ml, car) => +(ml / OIL_VOL[car.vol][2]).toFixed(car.vol === 'ml' ? 0 : car.vol === 'oz' ? 1 : 2);
+  const oilVol = (ml, car) => oilVolN(ml, car).toLocaleString('en-US') + ' ' + OIL_VOL[car.vol][1];
+  const oilDist = (d, car) => Math.round(d).toLocaleString('en-US') + ' ' + car.dist;
+  const oilMD = (d) => (+d.slice(5, 7)) + '/' + (+d.slice(8, 10));
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  function oilLogs(id) {
+    return S.oil.logs.map((l, i) => [l, i]).filter((x) => x[0].car === id).sort((a, b) => (a[0].date < b[0].date ? -1 : a[0].date > b[0].date ? 1 : a[1] - b[1])).map((x) => x[0]);
+  }
+  // Best guess at the odometer today: the newest reading, plus what you drive in a week for each week since.
+  function oilOdoNow(car, logs) {
+    const l = [...logs].reverse().find((x) => x.odo != null); if (!l) return null;
+    const wk = car.perWeek > 0 ? car.perWeek * Math.max(0, C.daysBetween(l.date, C.today())) / 7 : 0;
+    return { odo: l.odo + wk, date: l.date, est: wk > 0 };
+  }
+  // Everything the screen and the reminders need, worked out from the log.
+  // Use rate = oil added between two level checks divided by the distance driven between them.
+  function oilStats(car) {
+    const logs = oilLogs(car.id), lev = logs.filter((l) => l.kind !== 'odo'), adds = lev.filter((l) => l.kind === 'add'), ints = [];
+    for (let i = 1; i < lev.length; i++) {
+      const a = lev[i - 1], b = lev[i];
+      if ((b.kind !== 'add' && b.kind !== 'check') || a.odo == null || b.odo == null || !(b.odo > a.odo)) continue;
+      ints.push({ log: b, dist: b.odo - a.odo, ml: b.ml || 0 });
+    }
+    const rateOf = (arr) => { const d = sum(arr, (x) => x.dist); return arr.length && d > 0 ? sum(arr, (x) => x.ml) / d * 1000 : null; };
+    ints.forEach((x) => { x.rate = x.ml / x.dist * 1000; });
+    const rate = rateOf(ints), rrate = rateOf(ints.slice(-3)), orate = rateOf(ints.slice(0, -3));
+    const up = ints.length >= 4 && rrate != null && orate != null && rrate > 0 && rrate > orate * 1.5;
+    const lastChange = [...lev].reverse().find((l) => l.kind === 'change') || null;
+    const ci = lastChange ? logs.indexOf(lastChange) : -1;
+    const sinceChange = sum(adds.filter((l) => logs.indexOf(l) > ci), (l) => l.ml || 0);
+    const gaps = []; for (let i = 1; i < adds.length; i++) gaps.push(C.daysBetween(adds[i - 1].date, adds[i].date));
+    return { logs, lev, adds, ints, tot: sum(adds, (l) => l.ml || 0), rate, rrate, up, lastChange, sinceChange, last: lev[lev.length - 1] || null,
+      od: oilOdoNow(car, logs), cost: sum(logs, (l) => l.cost || 0), avgGap: gaps.length ? sum(gaps) / gaps.length : null };
+  }
+  // What is due. Any check, top off, or oil change restarts the check clock. An odometer reading alone does not.
+  function oilDue(car, st) {
+    const t = C.today(), base = st.last ? st.last.date : car.start || t, days = Math.max(0, C.daysBetween(base, t)), r = { days };
+    const lo = [...st.lev].reverse().find((l) => l.odo != null);
+    if (st.od && lo) r.since = Math.max(0, st.od.odo - lo.odo);
+    r.checkDue = !!((car.everyDays && days >= car.everyDays) || (car.everyDist && r.since != null && r.since >= car.everyDist));
+    r.inDays = car.everyDays ? car.everyDays - days : null;
+    r.inDist = car.everyDist && r.since != null ? car.everyDist - r.since : null;
+    const ch = st.lastChange;
+    if (ch) {
+      r.chDays = C.daysBetween(ch.date, t);
+      if (st.od && ch.odo != null) r.chSince = Math.max(0, st.od.odo - ch.odo);
+      r.chDue = !!((car.chgDays && r.chDays >= car.chgDays) || (car.chgDist && r.chSince != null && r.chSince >= car.chgDist));
+    }
+    r.burn = car.burnMl > 0 && st.ints.length >= 2 && st.rrate != null && st.rrate > car.burnMl;
+    return r;
+  }
+  function oilTodo(add) {
+    if (!extraOn('oil')) return;
+    if (!S.oil.cars.length) add('oilsetup', 'Oil tracking is on. Add your car to start the reminders.', 'openMore', 'Add a car', { v: 'oil' });
+    S.oil.cars.forEach((car) => {
+      const st = oilStats(car), du = oilDue(car, st), nm = esc(car.name), tag = car.id + (st.last ? st.last.id : 'new');
+      if (du.checkDue) {
+        const bits = [du.inDays != null && du.inDays <= 0 ? plural(du.days, 'day') + ' since the last check' : '', du.since != null && car.everyDist && du.since >= car.everyDist ? 'about ' + oilDist(du.since, car) + ' since the last check' : ''].filter(Boolean);
+        add('oil' + tag, `Check the oil in your ${nm}. ${bits.length ? bits.join(', and ') + '.' : ''} Log it, even if it did not need any.`, 'oilLog', 'Log it', { car: car.id, kind: 'add' }, 'y');
+      }
+      if (du.chDue) add('oilchg' + car.id + st.lastChange.id, `Oil change due for your ${nm}. It has been ${plural(du.chDays, 'day')}${du.chSince != null ? ' and about ' + oilDist(du.chSince, car) : ''} since the last one.`, 'oilLog', 'I changed it', { car: car.id, kind: 'change' }, 'y');
+      if (du.burn) add('oilburn' + tag, `Your ${nm} has been using about ${oilVol(st.rrate, car)} per 1,000 ${car.dist} lately, more than your limit of ${oilVol(car.burnMl, car)}. Worth having it looked at.`, 'openMore', 'See the graph', { v: 'oil' }, 'r');
+    });
+  }
+
+  // ----- oil: the screen -----
+  function oilBarsSVG(car, st) {
+    const pts = st.adds.slice(-12); if (!pts.length) return '';
+    const W = 320, H = 160, top = 18, bot = 22, vals = pts.map((l) => oilVolN(l.ml, car)), mx = Math.max(...vals, 0.01), bw = W / pts.length;
+    const y = (v) => top + (H - top - bot) * (1 - v / mx), every = pts.length > 8 ? 2 : 1;
+    let svg = `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Oil added each time">`;
+    pts.forEach((l, i) => {
+      const cx = i * bw + bw / 2, yy = y(vals[i]);
+      svg += `<rect class="tb${i === pts.length - 1 ? ' cur' : ''}" x="${(i * bw + bw * 0.17).toFixed(1)}" y="${yy.toFixed(1)}" width="${(bw * 0.66).toFixed(1)}" height="${Math.max(0, H - bot - yy).toFixed(1)}" rx="4"/>`;
+      if ((pts.length - 1 - i) % every === 0) svg += `<text class="tl" x="${cx.toFixed(1)}" y="${H - 6}">${oilMD(l.date)}</text>`;
+      if (pts.length <= 8) svg += `<text class="tv" x="${cx.toFixed(1)}" y="${(yy - 5).toFixed(1)}">${vals[i]}</text>`;
+    });
+    return svg + '</svg>';
+  }
+  function oilRateSVG(car, st) {
+    const pts = st.ints.slice(-12); if (pts.length < 2) return '';
+    const W = 320, H = 160, top = 18, bot = 22, vals = pts.map((x) => oilVolN(x.rate, car)), lim = car.burnMl > 0 ? oilVolN(car.burnMl, car) : 0, mx = Math.max(...vals, lim, 0.01);
+    const x = (i) => 16 + (W - 32) * i / (pts.length - 1), y = (v) => top + (H - top - bot) * (1 - v / mx);
+    let svg = `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Oil used per 1,000 ${car.dist}">`;
+    if (lim) svg += `<line class="tp" x1="0" x2="${W}" y1="${y(lim).toFixed(1)}" y2="${y(lim).toFixed(1)}"/>`;
+    svg += `<polyline class="tline" points="${pts.map((p, i) => x(i).toFixed(1) + ',' + y(vals[i]).toFixed(1)).join(' ')}"/>`;
+    pts.forEach((p, i) => { svg += `<circle class="tdot" cx="${x(i).toFixed(1)}" cy="${y(vals[i]).toFixed(1)}" r="4"/>`; if (i === 0 || i === pts.length - 1) svg += `<text class="tl" x="${Math.min(W - 14, Math.max(14, x(i))).toFixed(1)}" y="${H - 6}">${oilMD(p.log.date)}</text><text class="tv" x="${Math.min(W - 14, Math.max(14, x(i))).toFixed(1)}" y="${(y(vals[i]) - 8).toFixed(1)}">${vals[i]}</text>`; });
+    return svg + '</svg>';
+  }
+  function OilView() {
+    let h = back() + '<h1 class="title">Oil top offs</h1><div class="sub">Check, add, and see how fast your car uses oil</div>';
+    const cars = S.oil.cars;
+    if (!cars.length) return h + card('Add your first car', '<p class="muted">Add a car, choose how often you want to check the oil, and log every time you add some. It works for any car, in quarts or liters, miles or kilometers.</p><button class="btn primary" data-act="oilCarSheet" data-id="">Add a car</button>');
+    const car = oilCar(ui.oilCar) || cars[0]; ui.oilCar = car.id;
+    if (cars.length > 1) h += `<div class="chips mb14">${cars.map((c) => `<label class="${c.id === car.id ? 'on' : ''}"><button type="button" class="tbtn" data-act="oilPick" data-id="${c.id}">${esc(c.name)}</button></label>`).join('')}</div>`;
+    const st = oilStats(car), du = oilDue(car, st), t = C.today();
+    let s = '';
+    if (du.checkDue) s += '<p class="med r">Time to check the oil</p>';
+    else {
+      const parts = [du.inDays != null ? 'in ' + plural(du.inDays, 'day') : '', du.inDist != null ? 'in about ' + oilDist(du.inDist, car) : ''].filter(Boolean);
+      s += parts.length ? `<p class="med g">Next check ${parts.join(' or ')}${parts.length > 1 ? ', whichever comes first' : ''}</p>` : '<p class="muted">No reminder set yet. Tap Car settings to choose how often.</p>';
+    }
+    if (car.everyDist && du.since == null) s += `<p class="muted small">Add an odometer reading to use the ${car.dist === 'mi' ? 'mile' : 'kilometer'} reminder.</p>`;
+    if (st.last) s += `<p class="muted small">Last entry: ${OIL_KIND[st.last.kind].toLowerCase()}, ${C.shortDate(st.last.date)}, ${st.last.date === t ? 'today' : plural(C.daysBetween(st.last.date, t), 'day') + ' ago'}.</p>`;
+    s += `<div class="col mt"><button class="btn primary" data-act="oilLog" data-car="${car.id}" data-kind="add">I added oil</button><div class="btns"><button class="btn" data-act="oilLog" data-car="${car.id}" data-kind="check">Checked, fine</button><button class="btn" data-act="oilLog" data-car="${car.id}" data-kind="change">Oil change</button></div><button class="btn" data-act="oilLog" data-car="${car.id}" data-kind="odo">Update odometer</button></div>`;
+    h += card(esc(car.name) + (car.spec ? ' <span class="muted small">' + esc(car.spec) + '</span>' : ''), s);
+    // numbers
+    const row = (a, b) => `<div class="row"><span>${a}</span><b>${b}</b></div>`;
+    let r = '';
+    if (st.adds.length) {
+      r += row('Total added', oilVol(st.tot, car) + ' in ' + plural(st.adds.length, 'time'));
+      r += row('Average each time', oilVol(st.tot / st.adds.length, car));
+      if (st.avgGap != null) r += row('Time between top offs', 'about ' + plural(Math.round(st.avgGap), 'day'));
+    }
+    if (st.rate != null) r += row(`Typical use per 1,000 ${car.dist}`, oilVol(st.rate, car));
+    if (st.rrate != null && st.ints.length > 1) r += row('Recent use, last 3', oilVol(st.rrate, car) + (st.up ? ' (going up)' : ''));
+    if (st.lastChange) r += row('Added since the last oil change', oilVol(st.sinceChange, car) + (car.capMl > 0 ? ' (' + Math.round(st.sinceChange / car.capMl * 100) + '% of what it holds)' : ''));
+    if (st.lastChange && (car.chgDays || car.chgDist)) {
+      const p = [car.chgDays ? du.chDays != null ? (car.chgDays - du.chDays > 0 ? 'in ' + plural(car.chgDays - du.chDays, 'day') : 'due now') : '' : '', car.chgDist && du.chSince != null ? (car.chgDist - du.chSince > 0 ? 'in about ' + oilDist(car.chgDist - du.chSince, car) : 'due now') : ''].filter(Boolean);
+      if (p.length) r += row('Next oil change', p.join(' or '));
+    } else if (!st.lastChange && (car.chgDays || car.chgDist)) r += '<p class="muted small">Log an oil change to start tracking the next one.</p>';
+    if (st.od) r += row('Odometer' + (st.od.est ? ' (estimated)' : ''), oilDist(st.od.odo, car));
+    if (st.cost > 0) r += row('Spent on oil', fm(st.cost));
+    if (st.up) r += '<p class="small y mt8">It has been using oil faster than before. Worth keeping an eye on, or having it looked at.</p>';
+    if (st.adds.slice(-3).filter((l) => l.level === 'below').length >= 2) r += '<p class="small y mt8">The level was below the low mark more than once lately. Check more often.</p>';
+    if (st.adds.length >= 2 && !st.ints.length) r += '<p class="muted small mt8">Add the odometer to each entry to see how fast it uses oil.</p>';
+    if (r) h += card('Numbers', r);
+    const bars = oilBarsSVG(car, st), line = oilRateSVG(car, st);
+    if (bars) h += card('Oil added each time', bars + `<p class="muted small">In ${OIL_VOL[car.vol][0].toLowerCase()}. Shows the last ${Math.min(12, st.adds.length)} top offs.</p>`);
+    if (line) h += card(`Oil used per 1,000 ${car.dist}`, line + `<p class="muted small">Each dot is one stretch between checks.${car.burnMl > 0 ? ' The dashed line is your limit.' : ''} This works best when you top up to the full mark each time.</p>`);
+    const list = [...st.logs].reverse();
+    h += card('History', list.length ? list.slice(0, 40).map((l) => `<div class="ptr item" data-act="oilEdit" data-id="${l.id}"><div class="row"><span class="t">${OIL_KIND[l.kind] || l.kind}</span><b>${l.ml > 0 ? oilVol(l.ml, car) : ''}</b></div><div class="muted small">${C.shortDate(l.date)}${l.odo != null ? ', ' + oilDist(l.odo, car) : ''}${l.level ? ', ' + OIL_LEVEL[l.level].toLowerCase() : ''}${l.cost > 0 ? ', ' + fm(l.cost) : ''}${l.note ? ', ' + esc(l.note) : ''}</div></div>`).join('') + (list.length > 40 ? '<p class="muted small mt8">Older entries are in the spreadsheet export.</p>' : '') : '<p class="muted">Nothing logged yet.</p>');
+    h += card('Tools', `<div class="col"><button class="btn" data-act="oilCarSheet" data-id="${car.id}">Car settings</button><button class="btn" data-act="oilIcs">Put repeating reminders on my calendar</button><button class="btn" data-act="oilCsv">Export as a spreadsheet</button><button class="btn" data-act="oilCarSheet" data-id="">Add another car</button></div><p class="muted small mt8">Reminders show on Home when you open the app. For a buzz on your phone, use the calendar reminders.</p>`);
+    return h;
+  }
+
+  // ----- oil: sheets and forms -----
+  const oilNum = (v, max) => { const n = Math.abs(C.num(v)); return Number.isFinite(n) ? Math.min(n, max) : 0; };
+  const oilOpt = (v) => (v ? String(v) : '');
+  function oilCarSheet(id) {
+    const c = id ? oilCar(id) : null, v = c ? c.vol : 'qt', d = c ? c.dist : 'mi', locked = !!(c && S.oil.logs.some((l) => l.car === c.id && l.odo != null));
+    const un = (ml) => (ml > 0 ? oilVolN(ml, { vol: v }) : '');
+    const inp = (name, val, ph, mode) => `<input type="text" inputmode="${mode || 'numeric'}" name="${name}" value="${esc(oilOpt(val))}" placeholder="${ph || ''}" autocomplete="off">`;
+    openSheet(`<h2>${c ? 'Car settings' : 'Add a car'}</h2><form data-form="oilcar"><input type="hidden" name="id" value="${c ? c.id : ''}">
+      <label class="f">Name</label><input type="text" name="name" maxlength="40" placeholder="Like Camry or Dad's truck" value="${esc(c ? c.name : '')}" autocomplete="off" required>
+      <label class="f">Oil type, optional</label><input type="text" name="spec" maxlength="40" placeholder="Like 0W-20 synthetic" value="${esc(c ? c.spec : '')}" autocomplete="off">
+      <div class="two"><div><label class="f">Oil units</label><select name="vol">${Object.keys(OIL_VOL).map((k) => `<option value="${k}" ${k === v ? 'selected' : ''}>${OIL_VOL[k][0]}</option>`).join('')}</select></div>
+      <div><label class="f">Distance units</label><select name="dist" ${locked ? 'disabled' : ''}><option value="mi" ${d === 'mi' ? 'selected' : ''}>Miles</option><option value="km" ${d === 'km' ? 'selected' : ''}>Kilometers</option></select></div></div>
+      ${locked ? '<p class="muted small">Distance units are locked because this car has odometer entries. Add it again as a new car to change them.</p>' : ''}
+      <p class="label mt">Remind me to check the oil</p>
+      <div class="two"><div><label class="f">Every how many days</label>${inp('every_days', c && c.everyDays, 'Like 14')}</div><div><label class="f">Or every distance</label>${inp('every_dist', c && c.everyDist, 'Like 1000')}</div></div>
+      <p class="muted small">Use one or both. The reminder shows when either one comes up. Any check or top off restarts it.</p>
+      <label class="f">About how far you drive in a week, optional</label>${inp('perweek', c && c.perWeek, 'Lets the app guess your odometer')}
+      <p class="label mt">Oil change, optional</p>
+      <div class="two"><div><label class="f">Every how many days</label>${inp('chg_days', c && c.chgDays, 'Like 180')}</div><div><label class="f">Or every distance</label>${inp('chg_dist', c && c.chgDist, 'Like 5000')}</div></div>
+      <label class="f">Oil capacity, optional</label>${inp('cap', un(c && c.capMl), 'What the engine holds', 'decimal')}
+      <label class="f">Warn me if it uses more than, per 1,000 distance, optional</label>${inp('burn', un(c && c.burnMl), 'Your manual or dealer can tell you what is normal', 'decimal')}
+      ${c ? '' : `<p class="label mt">Where you are now, all optional</p><label class="f">Odometer now</label>${inp('odo', '', 'Like 84500')}<div class="two"><div><label class="f">Last oil change date</label><input type="date" name="chg_date"></div><div><label class="f">Odometer then</label>${inp('chg_odo', '', '')}</div></div>`}
+      ${c ? `<button class="mt btn danger" type="button" data-act="oilCarDel" data-id="${c.id}">Delete this car and its entries</button>` : ''}
+      <div class="btns sheetbar"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+  }
+  function oilLogSheet(l, carId, kind0) {
+    const car = oilCar(carId); if (!car) return;
+    const kind = l ? l.kind : kind0 || 'add', logs = oilLogs(car.id), od = oilOdoNow(car, logs);
+    const kinds = kind === 'start' ? ['start'] : ['add', 'check', 'change', 'odo'];
+    const amt = l && l.ml > 0 ? oilVolN(l.ml, car) : '';
+    openSheet(`<h2>${l ? 'Edit entry' : 'Log oil'}</h2><p class="muted small">${esc(car.name)}</p><form data-form="oillog"><input type="hidden" name="id" value="${l ? l.id : ''}"><input type="hidden" name="car" value="${car.id}">
+      <div class="chips">${kinds.map((k) => `<input type="radio" id="ok_${k}" name="kind" value="${k}" ${k === kind ? 'checked' : ''}><label for="ok_${k}">${OIL_KIND[k]}</label>`).join('')}</div>
+      <label class="f">Date</label><input type="date" name="date" value="${l ? l.date : C.today()}">
+      <label class="f">Oil added (${OIL_VOL[car.vol][0].toLowerCase()})</label><input type="text" inputmode="decimal" name="amount" value="${amt}" placeholder="Leave empty for a check or odometer reading" autocomplete="off">
+      <label class="f">Odometer (${car.dist}), optional</label><input type="text" inputmode="numeric" name="odo" value="${l && l.odo != null ? l.odo : ''}" placeholder="${od ? 'Last known ' + Math.round(od.odo) : 'Like 84500'}" autocomplete="off">
+      <label class="f">Dipstick before adding</label><div class="chips"><input type="radio" id="lv_" name="level" value="" ${!l || !l.level ? 'checked' : ''}><label for="lv_">Not sure</label>${Object.keys(OIL_LEVEL).map((k) => `<input type="radio" id="lv_${k}" name="level" value="${k}" ${l && l.level === k ? 'checked' : ''}><label for="lv_${k}">${OIL_LEVEL[k]}</label>`).join('')}</div>
+      <label class="f">What the oil cost, optional</label><input type="text" inputmode="decimal" name="cost" value="${l && l.cost > 0 ? l.cost : ''}" placeholder="0.00" autocomplete="off">
+      <label class="f">Note</label><input type="text" name="note" maxlength="120" value="${esc(l ? l.note : '')}" placeholder="Optional, like 5W-30 from the store" autocomplete="off">
+      ${l ? `<button class="mt btn danger" type="button" data-act="oilLogDel" data-id="${l.id}">Delete this entry</button>` : ''}
+      <div class="btns sheetbar"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+    if (!l) { const a = $('#sheet input[name=amount]'); if (a && kind === 'add') setTimeout(() => a.focus(), 50); }
+  }
+  forms.oilcar = (fd) => {
+    extrasInit();
+    const id = fd.get('id'), old = id ? oilCar(id) : null; if (id && !old) { closeSheet(); return; }
+    const name = String(fd.get('name') || '').trim().slice(0, 40); if (!name) { toast('Give the car a name'); return; }
+    const vol = OIL_VOL[fd.get('vol')] ? fd.get('vol') : 'qt';
+    const locked = !!(old && S.oil.logs.some((l) => l.car === old.id && l.odo != null));
+    const dist = locked ? old.dist : fd.get('dist') === 'km' ? 'km' : 'mi';
+    const f = { name, spec: String(fd.get('spec') || '').trim().slice(0, 40), vol, dist,
+      everyDays: Math.round(oilNum(fd.get('every_days'), 3650)), everyDist: Math.round(oilNum(fd.get('every_dist'), 1000000)),
+      perWeek: Math.round(oilNum(fd.get('perweek'), 20000)), chgDays: Math.round(oilNum(fd.get('chg_days'), 3650)), chgDist: Math.round(oilNum(fd.get('chg_dist'), 1000000)),
+      capMl: oilToMl(oilNum(fd.get('cap'), 1000), { vol }), burnMl: oilToMl(oilNum(fd.get('burn'), 1000), { vol }) };
+    if (old) { Object.assign(old, f); }
+    else {
+      const car = Object.assign({ id: uid(), start: C.today() }, f); S.oil.cars.push(car); ui.oilCar = car.id;
+      const today = C.today(), odoRaw = String(fd.get('odo') || '').trim(), odo = odoRaw === '' ? null : Math.round(oilNum(odoRaw, 5000000));
+      const cd = fd.get('chg_date'), cdo = String(fd.get('chg_odo') || '').trim();
+      if (cd && cd <= today) S.oil.logs.push({ id: uid(), car: car.id, date: cd, kind: 'change', ml: 0, odo: cdo === '' ? null : Math.round(oilNum(cdo, 5000000)), level: '', cost: 0, note: '' });
+      S.oil.logs.push({ id: uid(), car: car.id, date: today, kind: 'start', ml: 0, odo, level: '', cost: 0, note: '' });
+    }
+    save(); closeSheet(); render(); toast('Saved');
+  };
+  forms.oillog = (fd) => {
+    extrasInit();
+    const car = oilCar(fd.get('car')); if (!car) { closeSheet(); return; }
+    const id = fd.get('id'), old = id ? S.oil.logs.find((x) => x.id === id) : null; if (id && !old) { closeSheet(); return; }
+    const kind = ['add', 'check', 'change', 'odo', 'start'].includes(fd.get('kind')) ? fd.get('kind') : 'add', date = fd.get('date') || C.today();
+    if (date > C.today()) { toast('That date is in the future'); return; }
+    const amt = oilNum(fd.get('amount'), 100000), ml = C.round2(oilToMl(amt, car));
+    if (kind === 'add' && !(amt > 0)) { toast('Enter how much oil you added'); return; }
+    const maxMl = car.capMl > 0 ? car.capMl : 10 * 946.353;
+    if ((kind === 'add' || kind === 'change') && ml > maxMl && !confirm('That is more than ' + (car.capMl > 0 ? 'the whole oil capacity' : '10 quarts') + '. Is the amount right?')) return;
+    const odoRaw = String(fd.get('odo') || '').trim(), odo = odoRaw === '' ? null : Math.round(oilNum(odoRaw, 5000000));
+    if (kind === 'odo' && odo == null) { toast('Enter the odometer'); return; }
+    if (odo != null) {
+      const others = oilLogs(car.id).filter((x) => x !== old && x.odo != null), before = others.filter((x) => x.date <= date).pop(), after = others.find((x) => x.date > date);
+      if (((before && odo < before.odo) || (after && odo > after.odo)) && !confirm('That odometer does not fit with your other entries. Save it anyway?')) return;
+    }
+    const lv = fd.get('level'), rec = { car: car.id, date, kind, ml: kind === 'add' || kind === 'change' ? ml : 0, odo, level: OIL_LEVEL[lv] && (kind === 'add' || kind === 'check') ? lv : '', cost: kind === 'odo' ? 0 : C.round2(oilNum(fd.get('cost'), 100000)), note: String(fd.get('note') || '').trim().slice(0, 120) };
+    if (old) Object.assign(old, rec); else S.oil.logs.push(Object.assign({ id: uid() }, rec));
+    save(); closeSheet(); render(); toast('Saved');
+  };
+  actions.oilPick = (d) => { ui.oilCar = d.id; render(); };
+  actions.oilLog = (d) => oilLogSheet(null, d.car, d.kind);
+  actions.oilEdit = (d) => { const l = S.oil.logs.find((x) => x.id === d.id); if (l) oilLogSheet(l, l.car, l.kind); };
+  actions.oilCarSheet = (d) => oilCarSheet(d.id || '');
+  actions.oilLogDel = (d) => {
+    if (!confirm('Delete this entry?')) return;
+    S.oil.logs = S.oil.logs.filter((x) => x.id !== d.id); save(); closeSheet(); render(); toast('Deleted');
+  };
+  actions.oilCarDel = (d) => {
+    const c = oilCar(d.id); if (!c || !confirm('Delete ' + c.name + ' and all of its oil entries?')) return;
+    S.oil.cars = S.oil.cars.filter((x) => x.id !== c.id); S.oil.logs = S.oil.logs.filter((x) => x.car !== c.id);
+    ui.oilCar = null; save(); closeSheet(); render(); toast('Deleted');
+  };
+  // Repeating all day events, so your phone's calendar does the nudging even when the app is closed.
+  function oilIcsText() {
+    const t = C.today(), stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, ''), d8 = (x) => x.replace(/-/g, ''), q = (x) => String(x).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Money app//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Oil checks'];
+    S.oil.cars.filter((c) => c.everyDays > 0).forEach((c) => {
+      const du = oilDue(c, oilStats(c)), first = C.addDays(t, Math.max(1, du.inDays == null ? c.everyDays : du.inDays));
+      L.push('BEGIN:VEVENT', 'UID:oil-' + c.id + '@money.app', 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + d8(first), 'DTEND;VALUE=DATE:' + d8(C.addDays(first, 1)), 'RRULE:FREQ=DAILY;INTERVAL=' + c.everyDays,
+        'SUMMARY:' + q('Check the oil: ' + c.name), 'DESCRIPTION:' + q('Check the dipstick, then log it in the Money app under More, Oil top offs.'), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + q('Check the oil: ' + c.name), 'TRIGGER:PT9H', 'END:VALARM', 'END:VEVENT');
+    });
+    L.push('END:VCALENDAR'); return L.join('\r\n') + '\r\n';
+  }
+  actions.oilIcs = async () => {
+    if (!S.oil.cars.some((c) => c.everyDays > 0)) { toast('Set a number of days in Car settings first'); return; }
+    try { await saveFile(oilIcsText(), 'oil-reminders.ics', 'text/calendar'); } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); }
+  };
+  actions.oilCsv = async () => {
+    const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"', rows = [['Date', 'Car', 'Type', 'Oil added', 'Oil unit', 'Odometer', 'Distance unit', 'Dipstick before', 'Cost', 'Note']];
+    S.oil.cars.forEach((c) => oilLogs(c.id).forEach((l) => rows.push([l.date, c.name, OIL_KIND[l.kind] || l.kind, l.ml > 0 ? oilVolN(l.ml, c) : '', OIL_VOL[c.vol][1], l.odo == null ? '' : l.odo, c.dist, l.level ? OIL_LEVEL[l.level] : '', l.cost > 0 ? l.cost : '', l.note || ''])));
+    rows.splice(1, rows.length - 1, ...rows.slice(1).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
+    try { await saveFile(rows.map((r) => r.map(q).join(',')).join('\n'), 'oil-log-' + C.today() + '.csv', 'text/csv'); } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); }
+  };
 
   // ---------- boot ----------
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

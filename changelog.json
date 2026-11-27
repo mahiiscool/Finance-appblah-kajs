@@ -1,5 +1,32 @@
 [
   {
+    "v": 41,
+    "date": "2026-11-27",
+    "title": "Extras: oil top offs",
+    "items": [
+      {
+        "type": "new",
+        "text": "Settings now has an Extras card, a place for optional tools you can switch on and off. Turning one off hides it and keeps your entries."
+      },
+      {
+        "type": "new",
+        "text": "First extra is Oil top offs. Add any car, pick quarts or liters and miles or kilometers, and choose how often to check the oil by days, distance, or both. Home reminds you when it is time."
+      },
+      {
+        "type": "new",
+        "text": "Log every time you add oil, check the level, or change it, with the odometer, the dipstick level, the cost, and a note. The app graphs how much you added and how fast the car uses oil per 1,000 miles or kilometers."
+      },
+      {
+        "type": "new",
+        "text": "It can warn you if the car starts using oil faster than before, or passes a limit you set, and remind you about the next oil change. You can put repeating check reminders on your phone calendar and export your log as a spreadsheet."
+      },
+      {
+        "type": "new",
+        "text": "Quick setup now asks if you want to track your car's oil use. Oil entries are saved in your backup."
+      }
+    ]
+  },
+  {
     "v": 40,
     "date": "2026-11-27",
     "title": "Easier to find Help",

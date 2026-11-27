@@ -160,3 +160,5 @@ html[data-font=serif]{--font:var(--f-serif)} html[data-font=rounded]{--font:var(
 html[data-font]{font-variant-numeric:tabular-nums}
 .fb-default{font-family:var(--f-default)} .fb-serif{font-family:var(--f-serif)} .fb-rounded{font-family:var(--f-rounded)} .fb-mono{font-family:var(--f-mono)}
 html[data-font=mono] .ringtext .big{font-size:23px}
+
+.trend .tline{fill:none;stroke:var(--blue);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}.trend .tdot{fill:var(--blue)}
