@@ -1,5 +1,16 @@
 [
   {
+    "v": 40,
+    "date": "2026-11-27",
+    "title": "Easier to find Help",
+    "items": [
+      {
+        "type": "change",
+        "text": "The little question mark on Home is now a blue Help button, so it is easy to spot. It opens the how to use this app guide."
+      }
+    ]
+  },
+  {
     "v": 39,
     "date": "2026-11-27",
     "title": "Pick a font",

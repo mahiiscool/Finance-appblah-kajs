@@ -615,7 +615,7 @@
   }
   function Home() {
     const t = C.today(), mk = C.monthKey(t), b = budgetOf();
-    let h = `<div class="head"><h1 class="title">Home</h1><div class="row g8"><button class="icon-btn helpbtn" data-act="openMore" data-v="guide" aria-label="How to use this app">?</button><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div></div><div class="sub">${C.longDate(t)}${mahi() || S.mode === 'summer' ? ', ' + (S.mode === 'school' ? 'school year' : 'summer') + ' budget' : ''}</div>`;
+    let h = `<div class="head"><h1 class="title">Home</h1><div class="row g8"><button class="helpbtn" data-act="openMore" data-v="guide" aria-label="Help: how to use this app"><span class="q">?</span>Help</button><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div></div><div class="sub">${C.longDate(t)}${mahi() || S.mode === 'summer' ? ', ' + (S.mode === 'school' ? 'school year' : 'summer') + ' budget' : ''}</div>`;
 
     const ws = C.weekStart(t);
     h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn primary" data-act="add">Log spending</button><button class="btn" data-act="paycheck">I got paid</button></div>' + weekBreakdown(ws) + '<button class="mt8 btn small" data-act="weekDetail">See this week\'s purchases</button>');
@@ -865,7 +865,7 @@
     ['Log as you go', 'Tap the blue plus at the bottom right after you buy something. Amount, what it was for, Save. Takes five seconds.'],
     ['Log every paycheck', 'Tap I got paid on Home each payday. That is how the app knows if a month came up short and how much to pull from savings.'],
     ['Check the To do card', 'When something needs you, Home shows it in a To do card. Tap the button and the app does the math.'],
-    ['Help is always here', 'Tap the question mark at the top of Home any time for a short guide to every feature.']
+    ['Help is always here', 'Tap the blue Help button at the top of Home any time for a short guide to every feature.']
   ];
   function tour() {
     if (!S) return; ui.tourI = ui.tourI || 0; const i = ui.tourI, x = TOUR[i];
