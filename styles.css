@@ -1,4 +1,5 @@
 :root{
+  --f-default:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; --f-serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Noto Serif",serif; --f-rounded:ui-rounded,"SF Pro Rounded","Arial Rounded MT Bold","Varela Round",Nunito,-apple-system,"Segoe UI",Roboto,sans-serif; --f-mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace; --font:var(--f-default);
   --bg:#0a1120; --card:#111b33; --line:#1f2f55; --btn:#1a2744; --text:#e8edf7; --muted:#9aa7c2;
   --blue:#5b9bff; --g:#34d399; --y:#fbbf24; --r:#f87171; --track:#1c2a4a;
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
@@ -7,7 +8,7 @@
   :root{ --on:#ffffff; --bg:#eef2fa; --card:#ffffff; --line:#d3dcf0; --btn:#e6edfb; --text:#10182b; --muted:#5b6985; --blue:#2563eb; --track:#dfe7f6; --g:#059669; --y:#d97706; --r:#dc2626; }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{overscroll-behavior-y:contain;margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;font-size:17px;line-height:1.35}
+html,body{overscroll-behavior-y:contain;margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:17px;line-height:1.35}
 .screen{padding:calc(var(--safe-t) + 28px) 20px calc(110px + var(--safe-b));max-width:640px;margin:0 auto}
 h1.title{font-size:36px;font-weight:800;margin:0;letter-spacing:-.5px}
 .head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
@@ -152,3 +153,8 @@ details.more > summary .muted{font-weight:500;display:block;margin-top:2px}
 .helpbtn{font-size:22px;font-weight:800;font-family:inherit;line-height:1}
 
 #toast{bottom:auto;top:calc(var(--safe-t) + 12px);box-shadow:0 6px 20px rgba(0,0,0,.25)}
+
+html[data-font=serif]{--font:var(--f-serif)} html[data-font=rounded]{--font:var(--f-rounded)} html[data-font=mono]{--font:var(--f-mono)}
+html[data-font]{font-variant-numeric:tabular-nums}
+.fb-default{font-family:var(--f-default)} .fb-serif{font-family:var(--f-serif)} .fb-rounded{font-family:var(--f-rounded)} .fb-mono{font-family:var(--f-mono)}
+html[data-font=mono] .ringtext .big{font-size:23px}

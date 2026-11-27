@@ -850,6 +850,7 @@
     ['Your bank statement', 'You can import transactions from your bank as a CSV file, or a screenshot. The app sorts them, skips duplicates, and lists money coming in unchecked so you only tick real refunds.', [['Import', 'openMore', { v: 'import' }]]],
     ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works. A new weekly amount starts this week, and past weeks keep what they had.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
     ['Updates', 'The app looks for a new version by itself whenever you open it. When one is ready, it asks if you want to update. Tap Update, or Not now to wait. Your data is not touched. You can also check by hand in Settings.', [['Open Settings', 'settings', {}]]],
+    ['Look and feel', 'In Settings you can pick a theme, a font, and the text size. They only change this phone, never your data.', [['Open Settings', 'settings', {}]]],
     ['Back up', 'Your data only lives on this phone. Back up every week and save the file somewhere safe, like iCloud Drive or Google Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
     ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
   ];
@@ -1213,6 +1214,7 @@
 
   function SecurityView() {
     return back() + `<h1 class="title">Settings</h1><div class="sub">Your data never leaves this device</div>` +
+      card('Font', `<div class="chips">${FONTS.map((f) => `<label class="${getFont() === f[0] ? 'on' : ''}"><button type="button" class="tbtn fb-${f[0]}" data-act="setFont" data-v="${f[0]}">${f[1]}</button></label>`).join('')}</div><p class="muted small mt8">Uses fonts already on your phone, so they can look a little different on iPhone and Android. Only changes this phone.</p>`) +
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
       card('App updates', `<p class="muted small">The app also looks for updates by itself when you open it. This pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
@@ -2296,8 +2298,14 @@
       if (S) renderWhenIdle();
     });
   }
+  // Font choice is per phone, like the theme. It only uses fonts already on the phone.
+  const FONTS = [['default', 'Default'], ['serif', 'Serif'], ['rounded', 'Rounded'], ['mono', 'Mono']];
+  function getFont() { try { const f = localStorage.getItem('moneyfont'); return FONTS.some((x) => x[0] === f) ? f : 'default'; } catch (e) { return 'default'; } }
+  function applyFont(f) { const h = document.documentElement; if (f === 'default') h.removeAttribute('data-font'); else h.setAttribute('data-font', f); }
+  actions.setFont = (d) => { try { localStorage.setItem('moneyfont', d.v); } catch (e) {} applyFont(d.v); render(); };
   actions.setTheme = (d) => { try { localStorage.setItem('moneytheme', d.v); } catch (e) {} applyTheme(d.v); render(); };
   applyTheme(getTheme());
+  applyFont(getFont());
   applyScale(getScale());
 
   // ---------- boot ----------

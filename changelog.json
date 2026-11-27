@@ -1,5 +1,16 @@
 [
   {
+    "v": 39,
+    "date": "2026-11-27",
+    "title": "Pick a font",
+    "items": [
+      {
+        "type": "new",
+        "text": "You can now pick a font in Settings: Default, Serif, Rounded, or Mono. It only changes this phone, and it uses fonts already on your phone, so it can look a little different on iPhone and Android."
+      }
+    ]
+  },
+  {
     "v": 38,
     "date": "2026-11-27",
     "title": "Update prompt",
