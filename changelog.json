@@ -22,7 +22,10 @@
       },
       {
         "type": "new",
-        "text": "Quick setup now asks if you want to track your car's oil use. Oil entries are saved in your backup."
+        "text": "Quick setup now asks if you want to track your car's oil use. Oil entries are saved in your backup."},
+      {
+        "type": "new",
+        "text": "When Oil top offs is on, Home shows an Oil card for each car with when the next check is due and quick buttons to log adding oil or a check."
       }
     ]
   },

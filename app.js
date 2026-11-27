@@ -621,6 +621,7 @@
     const ws = C.weekStart(t);
     h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn primary" data-act="add">Log spending</button><button class="btn" data-act="paycheck">I got paid</button></div>' + weekBreakdown(ws) + '<button class="mt8 btn small" data-act="weekDetail">See this week\'s purchases</button>');
     h += todoCard();
+    h += oilHomeCard();
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
       h += card('Sunday review', `<p class="med">Review the week and settle up</p>${(() => { const w = pastWeeks(1)[0]; return w ? `<p class="${w.sp > w.lim ? 'r' : 'g'}">Last week: ${fm(w.sp)} of ${fm(w.lim)}, ${fm(Math.abs(w.lim - w.sp))} ${w.sp > w.lim ? 'over' : 'under'}.</p>` : ''; })()}<p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
@@ -2397,7 +2398,6 @@
   }
   function oilTodo(add) {
     if (!extraOn('oil')) return;
-    if (!S.oil.cars.length) add('oilsetup', 'Oil tracking is on. Add your car to start the reminders.', 'openMore', 'Add a car', { v: 'oil' });
     S.oil.cars.forEach((car) => {
       const st = oilStats(car), du = oilDue(car, st), nm = esc(car.name), tag = car.id + (st.last ? st.last.id : 'new');
       if (du.checkDue) {
@@ -2433,6 +2433,19 @@
     pts.forEach((p, i) => { svg += `<circle class="tdot" cx="${x(i).toFixed(1)}" cy="${y(vals[i]).toFixed(1)}" r="4"/>`; if (i === 0 || i === pts.length - 1) svg += `<text class="tl" x="${Math.min(W - 14, Math.max(14, x(i))).toFixed(1)}" y="${H - 6}">${oilMD(p.log.date)}</text><text class="tv" x="${Math.min(W - 14, Math.max(14, x(i))).toFixed(1)}" y="${(y(vals[i]) - 8).toFixed(1)}">${vals[i]}</text>`; });
     return svg + '</svg>';
   }
+  // Small card on Home while the extra is on: how each car stands, with quick buttons.
+  function oilHomeCard() {
+    if (!extraOn('oil')) return '';
+    if (!S.oil.cars.length) return card('Oil', '<p class="muted">Add your car to get oil check reminders and see how fast it uses oil.</p><button class="btn primary" data-act="openMore" data-v="oil">Add a car</button>');
+    return card('Oil', S.oil.cars.map((car) => {
+      const st = oilStats(car), du = oilDue(car, st), t = C.today();
+      const parts = [du.inDays != null ? 'in ' + plural(Math.max(0, du.inDays), 'day') : '', du.inDist != null ? 'in about ' + oilDist(Math.max(0, du.inDist), car) : ''].filter(Boolean);
+      const line = du.checkDue ? '<p class="med r">Time to check the oil</p>' : parts.length ? `<p class="med g">Next check ${parts.join(' or ')}</p>` : '<p class="muted">No reminder set. Open it to choose how often.</p>';
+      const last = st.last ? `<p class="muted small">Last entry ${C.shortDate(st.last.date)}${st.last.date === t ? ', today' : ''}.${st.rate != null ? ' Uses about ' + oilVol(st.rate, car) + ' per 1,000 ' + car.dist + '.' : ''}</p>` : '';
+      return `<div class="item"><p class="t">${esc(car.name)}</p>${line}${last}<div class="btns"><button class="btn small primary" data-act="oilLog" data-car="${car.id}" data-kind="add">I added oil</button><button class="btn small" data-act="oilLog" data-car="${car.id}" data-kind="check">Checked, fine</button><button class="btn small" data-act="oilOpen" data-id="${car.id}">Open</button></div></div>`;
+    }).join(''));
+  }
+  actions.oilOpen = (d) => { ui.oilCar = d.id; ui.tab = 'more'; ui.more = 'oil'; render(); window.scrollTo(0, 0); };
   function OilView() {
     let h = back() + '<h1 class="title">Oil top offs</h1><div class="sub">Check, add, and see how fast your car uses oil</div>';
     const cars = S.oil.cars;
