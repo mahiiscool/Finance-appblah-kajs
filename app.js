@@ -139,7 +139,7 @@
     for (; C.monthKey(w) === mk; w = C.addDays(w, 7)) out.push(w);
     return out;
   }
-  const monthPlan = (mk) => C.round2((budgetOf().foodWeek || 0) * weeksOf(mk).length);
+  const monthPlan = (mk) => C.round2((budgetOf(modeFor(mk)).foodWeek || 0) * weeksOf(mk).length);
   const monthFlex = (mk) => C.round2(sum(weeksOf(mk), (w) => weekSpend(w)));
   // Subscriptions budget is the total of the subscription bills in Recurring bills.
   function syncSubs() {
@@ -172,7 +172,7 @@
   // Which mode (school or summer) a month was in, so old months keep the right usual income.
   function modeFor(mk) { const l = (S.modeLog || []).filter((x) => x.mk <= mk).sort((a, c) => (a.mk < c.mk ? -1 : 1)); return l.length ? l[l.length - 1].mode : S.mode; }
   // Time off: a month where you expect less pay than usual, with the gap covered from savings.
-  const offOf = (mk) => (S.timeOff || {})[mk];
+  const offOf = (mk) => (S.timeOffOn ? (S.timeOff || {})[mk] : undefined);
   const usualPay = (mk) => incomeOf(modeFor(mk));
   const expectPay = (mk) => (offOf(mk) ? offOf(mk).income : usualPay(mk));
   const loggedPay = (mk) => C.round2(sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount));
@@ -195,6 +195,34 @@
     const flex = monthFlex(mk), plan = monthPlan(mk), over = C.round2(Math.max(0, flex - plan)), inc = monthIncome(mk), out = monthOut(mk), lv = C.round2(inc - out);
     return { flex, plan, over, inc, out, lv, short: C.round2(Math.max(0, -lv)) };
   }
+  // Paydays you should have had in a month, from the date of your first logged paycheck and your pay schedule.
+  const freqFor = (mk) => (modeFor(mk) === 'summer' ? S.budget.summer.freq : S.payFreq) || 'biweekly';
+  const checkFor = (mk) => (modeFor(mk) === 'summer' ? S.budget.summer.pay || 0 : C.round2(incomeOf('school') / (PER_MONTH[freqFor(mk)] || 1)));
+  function paydaysIn(mk, upTo) {
+    const pays = (S.paychecks || []).map((x) => x.date).sort(); if (!pays.length) return null;
+    const f = freqFor(mk), end = mk + '-' + pad(dim(mk)), last = upTo && upTo < end ? upTo : end, out = [];
+    if (f === 'weekly' || f === 'biweekly') {
+      const step = f === 'weekly' ? 7 : 14, anchor = pays[0];
+      let d = C.addDays(anchor, Math.ceil(C.daysBetween(anchor, mk + '-01') / step) * step);
+      for (; d <= last; d = C.addDays(d, step)) out.push(d);
+    } else if (f === 'semimonthly') [mk + '-15', end].forEach((d) => { if (d <= last) out.push(d); });
+    else if (end <= last) out.push(end);
+    return out;
+  }
+  // Everything the 1st of the month needs: what came in, what went out, pay missed, and what to pull from savings.
+  // Made = paychecks you logged (or the income you typed). Need = bills and fixed costs plus that month's weekly money.
+  // Pull from savings = need minus made. Nothing here is a guess.
+  function closeOut(mk) {
+    const t = C.today(), done = mk < C.monthKey(t), b = budgetOf(modeFor(mk)), fix = (S.incomeFix || {})[mk];
+    const got = loggedPay(mk), typed = typeof fix === 'number', made = typed ? fix : got;
+    const bills = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0)), weekly = monthPlan(mk), need = C.round2(bills + weekly);
+    const days = paydaysIn(mk, done ? null : t), per = checkFor(mk);
+    const expected = days ? C.round2(days.length * per) : null, gap = expected === null ? 0 : C.round2(expected - got), missed = expected === null ? null : gap >= per / 2 ? gap : 0;
+    const pull = C.round2(Math.max(0, need - made)), pulled = C.round2(((S.pulled || {})[mk] || 0) + ((offOf(mk) || {}).moved || 0));
+    const out = monthOut(mk);
+    return { done, made, typed, noPay: !typed && got === 0, bills, weekly, weeks: weeksOf(mk).length, need, pull, pulled, still: C.round2(Math.max(0, pull - pulled)),
+      out, realShort: C.round2(Math.max(0, out - made)), checks: days ? days.length : null, per, expected, missed };
+  }
   function offPlan(mk) {
     const o = offOf(mk); if (!o) return null;
     const b = budgetOf(), bills = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0));
@@ -206,7 +234,7 @@
   function monthOverNote(mk, done) {
     const o = monthOver(mk); if (!o.over) return '';
     if (o.lv >= 0) return `<p class="small y">${fm(o.over)} over on weekly money this month. It ${done ? 'came' : 'is coming'} out of your savings${done ? '' : ', so you will save that much less'}.</p>`;
-    return `<p class="small r">${fm(o.over)} over on weekly money, and you spent ${fm(o.short)} more than your income of ${fm(o.inc)}.${offOf(mk) ? ' This is a time off month, so savings covers it and nothing carries into next month.' : S.overCarry && S.overSettle !== false ? ' The part savings could not cover carries into next month.' : ''}</p>`;
+    return `<p class="small r">${fm(o.over)} over on weekly money, and you spent ${fm(o.short)} more than your income of ${fm(o.inc)}.${offOf(mk) || S.shortFromSav !== false ? ' Savings covers the gap, so nothing carries into next month.' : S.overCarry && S.overSettle !== false ? ' The part savings could not cover carries into next month.' : ''}</p>`;
   }
   // This month, assuming every bill gets paid and all the weekly money gets spent.
   function projectedLeftover(mk) {
@@ -361,7 +389,7 @@
     let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
     let carry = 0, prevMk = null;
     // New month: overspending still owed gets paid from last month's leftover savings. Only what savings could not cover keeps carrying.
-    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 || offOf(prevMk) ? 0 : Math.max(carry, lv); } prevMk = mk; };
+    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 || offOf(prevMk) || S.shortFromSav !== false ? 0 : Math.max(carry, lv); } prevMk = mk; };
     for (; w < ws; w = C.addDays(w, 7)) {
       settle(C.monthKey(w));
       const left = C.round2(base + carry + coverOf(w) - weekSpend(w));
@@ -438,10 +466,14 @@
       const nm = C.monthKey(next), off = offOf(nm);
       if (C.daysBetween(next, t) >= 1 && !(off && loggedPay(nm) >= off.income)) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next });
     }
-    // last month income still a guess, only if you usually log paychecks
-    if (pays.length && last >= lo.start && /guess/.test(incomeNote(last))) add('inc' + last, `${C.monthName(last)} has no paycheck logged, so its income is a guess.`, 'fixIncome', 'Fix it', { mk: last });
-    // time off: money to move from savings, this month and last month
-    [last, mk].forEach((m) => { const op = offPlan(m); if (!op || m < lo.start) return;
+    // close out last month: find out if you came up short and how much to pull from savings
+    if (last >= lo.start) {
+      const co = closeOut(last), nm = C.monthName(last);
+      if (co.noPay) add('coinc' + last, `Close out ${nm}: no paycheck is logged. Log your paychecks, or enter what you made, even 0, so the app can tell you what to pull from savings.`, 'fixIncome', 'Enter pay', { mk: last }, 'y');
+      else if (co.still >= 1) add('co' + last + co.pulled, `Close out ${nm}: you made ${fm(co.made)}${co.missed ? ' (' + fm(co.missed) + ' less than your usual paychecks)' : ''} and needed ${fm(co.need)}. Pull ${fm(co.still)} from savings.`, 'pullSav', 'I pulled it', { mk: last, amt: co.still }, 'y');
+    }
+    // time off planned for this month: money to move from savings ahead of time
+    [mk].forEach((m) => { const op = offPlan(m); if (!op || m < lo.start) return;
       const need = C.round2((op.done ? op.short : Math.max(op.short, op.fromSavPlan)) - op.moved);
       if (need >= 1) add('off' + m + op.moved, `${C.monthName(m)}${op.note ? ' (' + esc(op.note) + ')' : ''}: ${op.done ? 'came up' : 'is about'} ${fm(need)} short. Move it from savings to checking when you need it.`, 'offMoved', 'I moved it', { mk: m, amt: need }, 'y'); });
     // bills past their due day that are not checked off
@@ -551,6 +583,22 @@
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
+    { const co = closeOut(mk), row = (l, v, cls, sub) => `<div class="row item"><span>${l}${sub ? `<br><span class="muted small">${sub}</span>` : ''}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
+      let inner = row(co.done ? 'You made' : 'Made so far', co.made, '', co.typed ? 'The income you typed' : co.checks !== null ? `Paychecks logged. ${co.checks} payday${co.checks === 1 ? '' : 's'}${co.done ? '' : ' so far'}, usually about ${fm(co.expected)}` : 'Paychecks logged');
+      if (co.missed) inner += row('Pay missed', co.missed, 'r', 'Usual paychecks minus what you logged');
+      inner += row('You need', co.need, '', `Bills ${fm(co.bills)} plus weekly money ${fm(co.weekly)} (${co.weeks} weeks)`);
+      if (co.noPay && co.done) inner += `<p class="small y mt8">No paycheck logged for this month. Log them or tap Set this month's income, even 0, to see what to pull.</p>`;
+      else if (co.pull < 0.01) inner += `<p class="small g mt8">${co.done ? 'You made enough. Nothing to pull from savings.' : 'You have made enough for this month already. Nothing to pull.'}</p>`;
+      else if (!co.done) inner += row('Still has to come in', co.pull, 'y') + `<p class="muted small mt8">Whatever has not come in by the end of the month is what you pull from savings. Home reminds you on the 1st.</p>` + (co.pulled ? row('Pulled so far', co.pulled, 'g') : '');
+      else {
+        inner += row('Pull from savings', co.pull, 'y');
+        if (co.pulled) inner += row('Pulled so far', co.pulled, 'g');
+        if (co.pulled && co.still >= 0.01) inner += row('Still to pull', co.still, 'y');
+        if (co.still >= 1) inner += `<button class="mt8 btn small" data-act="pullSav" data-mk="${mk}" data-amt="${co.still}">I pulled ${fm(co.still)}</button>`;
+      }
+      if (co.done && !co.noPay && Math.abs(co.realShort - co.pull) >= 1) inner += `<p class="muted small mt8">Going by what you actually spent (${fm(co.out)}), you were ${co.realShort ? fm(co.realShort) + ' short' : 'not short'}. ${co.realShort < co.pull ? 'You could pull less.' : 'You may need to pull a little more.'}</p>`;
+      h += card('Savings pull', inner);
+    }
     const op = offPlan(mk);
     if (op) {
       const row = (l, v, cls) => `<div class="row item"><span>${l}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
@@ -564,7 +612,7 @@
     h += card('Spent vs budget', rows);
     { const o = monthOver(mk), done = mk < C.monthKey(C.today());
       const inote = incomeNote(mk);
-      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<div class="btns"><button class="btn small" data-act="fixIncome" data-mk="${mk}">Set this month's income</button><button class="btn small" data-act="offSheet" data-mk="${mk}">${offOf(mk) ? 'Edit time off' : 'Time off or less pay'}</button></div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
+      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<div class="btns"><button class="btn small" data-act="fixIncome" data-mk="${mk}">Set this month's income</button>${S.timeOffOn ? `<button class="btn small" data-act="offSheet" data-mk="${mk}">${offOf(mk) ? 'Edit time off' : 'Plan time off'}</button>` : ''}</div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
     const fs = sum(S.expenses.filter((e) => e.paidFromSavings && C.monthKey(e.date) === mk), (e) => e.amount);
     const fo = sum(S.expenses.filter((e) => e.forOther && C.monthKey(e.date) === mk), (e) => e.amount);
     const hh = sum(S.expenses.filter((e) => e.household && C.monthKey(e.date) === mk), (e) => e.amount);
@@ -757,7 +805,8 @@
       : c.id === 'subs' && S.bills.some((x) => x.cat === 'subs') ? `<label class="f">${esc(c.name)}</label><div class="row item"><b>${fm(b.amounts.subs || 0)}</b><button class="btn small" data-act="openMore" data-v="bills">Edit list</button></div><p class="muted small">The total of your subscriptions in Recurring bills. Add or change one there.</p>`
       : `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join('') +
       '<button class="mt btn" data-act="addFixed">Add a bill</button><p class="muted small mt8">For anything you pay every month, like Amazon Prime. It counts toward your monthly bills, not your weekly money.</p>');
-    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p>` : ''}`);
+    h += card('Time off planning', `<label class="check"><input type="checkbox" data-act="toggleTimeOff" ${S.timeOffOn ? 'checked' : ''}>Plan time off ahead of time</label><p class="muted small">Optional. Off, the app just works out on the 1st how much to pull from savings for last month. On, you can also set lower pay for a month ahead of time on Budget, Month.</p>`);
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p><label class="check mt8"><input type="checkbox" data-act="toggleShort" ${S.shortFromSav !== false ? 'checked' : ''}>If a month comes up short, cover it all from savings</label><p class="muted small">On the 1st, the app tells you how much to pull from savings for last month, like when you missed a paycheck, and next month starts clean.</p>` : ''}`);
     const lo = LO();
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
@@ -1620,6 +1669,14 @@
       if (S.autoBal) { const chk = S.accounts.find((a) => a.type === 'checking'), sav = S.accounts.find((a) => a.type === 'savings'); if (chk && sav) { chk.balance = C.round2((chk.balance || 0) + amt); sav.balance = C.round2((sav.balance || 0) - amt); } }
       save(); render(); toast(fm(amt) + ' moved from savings');
     },
+    pullSav(d) {
+      const amt = C.round2(+d.amt); if (!(amt > 0)) return;
+      S.pulled = S.pulled || {}; S.pulled[d.mk] = C.round2((S.pulled[d.mk] || 0) + amt);
+      if (S.autoBal) { const chk = S.accounts.find((a) => a.type === 'checking'), sav = S.accounts.find((a) => a.type === 'savings'); if (chk && sav) { chk.balance = C.round2((chk.balance || 0) + amt); sav.balance = C.round2((sav.balance || 0) - amt); } }
+      save(); render(); toast(fm(amt) + ' pulled from savings for ' + C.monthName(d.mk));
+    },
+    toggleTimeOff(d, el) { S.timeOffOn = el.checked; save(); render(); },
+    toggleShort(d, el) { S.shortFromSav = el.checked; save(); render(); },
     todoLater(d) { S.dismissed['todo' + d.k + C.today()] = true; save(); render(); },
     balDone() { S.balCheck = C.monthKey(C.today()); save(); render(); toast('Nice. Fix any balance in Cards and balances if it was off.'); },
     refundCame(d) {

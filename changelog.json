@@ -1,5 +1,36 @@
 [
   {
+    "v": 29,
+    "date": "2026-11-27",
+    "title": "Savings pull on the 1st",
+    "items": [
+      {
+        "type": "new",
+        "text": "New Savings pull card on Budget, Month. It shows what you made (your logged paychecks), what the month needed (bills plus weekly money), and how much to pull from savings."
+      },
+      {
+        "type": "new",
+        "text": "On the 1st, Home tells you how much to pull from savings for last month. Tap I pulled it and your checking and savings balances update."
+      },
+      {
+        "type": "new",
+        "text": "Shows how much pay you missed compared to your usual paychecks. Small swings from hours do not count, only about half a paycheck or more."
+      },
+      {
+        "type": "new",
+        "text": "If no paycheck was logged for last month, Home asks you to log them or type what you made, even 0."
+      },
+      {
+        "type": "change",
+        "text": "A month that comes up short is covered from savings by default, so the next month's weekly money starts clean. Turn it off in Budget and income, under Rollover."
+      },
+      {
+        "type": "change",
+        "text": "Planning time off ahead is now optional and off by default. Turn it on in Budget and income, under Time off planning."
+      }
+    ]
+  },
+  {
     "v": 28,
     "date": "2026-11-27",
     "title": "Time off plan and trip spending",

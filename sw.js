@@ -1,4 +1,4 @@
-const CACHE = 'money-v28';
+const CACHE = 'money-v29';
 const ASSETS = ['./', 'index.html', 'styles.css', 'core.js', 'vault.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'changelog.json'];
 
 self.addEventListener('install', (e) => {
