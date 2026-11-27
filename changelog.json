@@ -1,5 +1,24 @@
 [
   {
+    "v": 34,
+    "date": "2026-11-27",
+    "title": "Smoother first day",
+    "items": [
+      {
+        "type": "fix",
+        "text": "A bill you add is no longer called past due just because its due day already passed this month. It only counts as late if it came due after you added it."
+      },
+      {
+        "type": "fix",
+        "text": "A subscription you just added no longer asks right away if you are still using it. That question comes back after 3 months."
+      },
+      {
+        "type": "change",
+        "text": "The weekly spending money note in Budget and income now says food, shopping, and anything else, to match setup."
+      }
+    ]
+  },
+  {
     "v": 33,
     "date": "2026-11-27",
     "title": "Backup restore",
