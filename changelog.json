@@ -1,5 +1,32 @@
 [
   {
+    "v": 25,
+    "date": "2026-11-27",
+    "title": "Month end overspend payoff",
+    "items": [
+      {
+        "type": "new",
+        "text": "If you go over your weekly money a bunch in one month, whatever you still owe at the end of the month gets paid from that month's savings. Your next month starts clean."
+      },
+      {
+        "type": "new",
+        "text": "If you spent all your income and there is no savings to cover it, only the part that could not be covered carries into next month."
+      },
+      {
+        "type": "new",
+        "text": "Budget, Month now has a Month result card: income, spent, saved or over your income, and how far over your weekly money went."
+      },
+      {
+        "type": "new",
+        "text": "The Savings card warns you when weekly overspending is eating into this month's savings."
+      },
+      {
+        "type": "change",
+        "text": "On by default. Turn it off in Budget and income, under Rollover, with Pay it off from month end savings."
+      }
+    ]
+  },
+  {
     "v": 24,
     "date": "2026-11-27",
     "title": "Add your own bills",

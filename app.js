@@ -156,6 +156,17 @@
   function monthIncome(mk) { const p = sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount); return p > 0 ? C.round2(p) : incomeOf(S.mode); }
   const monthOut = (mk) => C.round2(sum(S.expenses.filter((e) => counted(e) && C.monthKey(e.date) === mk), (e) => e.amount));
   const leftoverOf = (mk) => C.round2(monthIncome(mk) - monthOut(mk));
+  // How the weekly money did over a whole month, and whether income covered it.
+  function monthOver(mk) {
+    const flex = C.round2(sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && C.monthKey(e.date) === mk), (e) => e.amount));
+    const plan = poolMonth(), over = C.round2(Math.max(0, flex - plan)), inc = monthIncome(mk), out = monthOut(mk), lv = C.round2(inc - out);
+    return { flex, plan, over, inc, out, lv, short: C.round2(Math.max(0, -lv)) };
+  }
+  function monthOverNote(mk, done) {
+    const o = monthOver(mk); if (!o.over) return '';
+    if (o.lv >= 0) return `<p class="small y">${fm(o.over)} over on weekly money this month. It ${done ? 'came' : 'is coming'} out of your savings${done ? '' : ', so you will save that much less'}.</p>`;
+    return `<p class="small r">${fm(o.over)} over on weekly money, and you spent ${fm(o.short)} more than your income of ${fm(o.inc)}.${S.overCarry && S.overSettle !== false ? ' The part savings could not cover carries into next month.' : ''}</p>`;
+  }
   // This month, assuming every bill gets paid and all the weekly money gets spent.
   function projectedLeftover(mk) {
     const b = budgetOf(), ms = monthSpend(mk);
@@ -173,6 +184,7 @@
     const lo = LO(), cur = C.monthKey(C.today()), y = savedThisYear(), proj = projectedLeftover(cur), last = C.shiftMonthKey(cur, -1);
     let inner = `<p class="big g">${fm(y.total)}</p><p class="muted">Saved in ${cur.slice(0, 4)} from money left over each month.</p>`;
     inner += `<div class="row item"><span>${C.monthName(cur)}, on track to save</span><b class="${proj < 0 ? 'r' : 'g'}">${proj < 0 ? fm(proj) + ' short' : fm(proj)}</b></div>`;
+    inner += monthOverNote(cur, false);
     inner += `<p class="muted small">If you pay every bill and spend all your weekly money. Every dollar of the ${fm(budgetOf().foodWeek)} a week you skip adds to it.${cur < lo.start ? ' Tracking starts ' + C.monthName(lo.start) + '.' : ''}</p>`;
     if (y.months.length || y.before) inner += '<p class="label mt">This year</p>' + (y.before ? `<div class="row item"><span>Before tracking</span><b>${fm(y.before)}</b></div>` : '') +
       y.months.slice().reverse().map((m) => `<div class="row item"><span>${C.monthName(m.mk)}${lo.moved[m.mk] !== undefined ? '<span class="pill g">Moved</span>' : ''}</span><b class="${m.v < 0 ? 'r' : 'g'}">${m.v < 0 ? fm(m.v) + ' short' : fm(m.v)}</b></div>`).join('');
@@ -295,12 +307,16 @@
     const cov = coverOf(ws);
     if (!base || (!rs && !os)) return C.round2(base + cov);
     let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
-    let carry = 0;
+    let carry = 0, prevMk = null;
+    // New month: overspending still owed gets paid from last month's leftover savings. Only what savings could not cover keeps carrying.
+    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 ? 0 : Math.max(carry, lv); } prevMk = mk; };
     for (; w < ws; w = C.addDays(w, 7)) {
+      settle(C.monthKey(w));
       const left = C.round2(base + carry + coverOf(w) - weekSpend(w));
       if (left >= 0) carry = rs && w >= rs ? Math.min(base, left) : 0;
       else carry = os && w >= os ? left : 0;
     }
+    settle(C.monthKey(ws));
     return C.round2(base + carry + cov);
   }
   // Money moved from savings to cover a big overspend in a given week.
@@ -435,6 +451,8 @@
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
     h += card('Spent vs budget', rows);
+    { const o = monthOver(mk), done = mk < C.monthKey(C.today());
+      h += card('Month result', `<div class="row item"><span>Income</span><b>${fm(o.inc)}</b></div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
     const fs = sum(S.expenses.filter((e) => e.paidFromSavings && C.monthKey(e.date) === mk), (e) => e.amount);
     const fo = sum(S.expenses.filter((e) => e.forOther && C.monthKey(e.date) === mk), (e) => e.amount);
     const hh = sum(S.expenses.filter((e) => e.household && C.monthKey(e.date) === mk), (e) => e.amount);
@@ -624,7 +642,7 @@
       ? `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" data-re="1" value="${esc(c.name)}" aria-label="Name"><button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button></div><input type="text" class="mt8" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}" aria-label="${esc(c.name)} amount">`
       : `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join('') +
       '<button class="mt btn" data-act="addFixed">Add a bill</button><p class="muted small mt8">For anything you pay every month, like Amazon Prime. It counts toward your monthly bills, not your weekly money.</p>');
-    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>`);
+    h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p>` : ''}`);
     const lo = LO();
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
@@ -1411,6 +1429,7 @@
       openSheet(`<h2>Cover with savings</h2><p class="muted">Use savings instead of making the next weeks pay it back. This week's spending money goes up by this amount.</p><form data-form="cover"><input type="hidden" name="ws" value="${ws}"><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${need.toFixed(2)}"><p class="muted small">It comes out of what you save this month, so your savings goes down by the same amount.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Cover it</button></div></form>${cv ? `<p class="muted small mt">Already covered this week: ${fm(cv)}.</p><button class="mt btn small danger" data-act="uncover" data-ws="${ws}">Undo cover</button>` : ''}`);
     },
     uncover(d) { S.covers = (S.covers || []).filter((c) => c.ws !== d.ws); save(); closeSheet(); render(); toast('Cover removed'); },
+    toggleSettle(d, el) { S.overSettle = el.checked; save(); render(); },
     toggleOver(d, el) { S.overCarry = el.checked; if (S.overCarry && !S.overSince) S.overSince = C.weekStart(C.today()); save(); render(); },
     toggleRoll(d, el) { S.rollover = el.checked; if (S.rollover && !S.rollSince) S.rollSince = C.weekStart(C.today()); save(); render(); },
     rcptPick() { $('#rcptfile').click(); },
