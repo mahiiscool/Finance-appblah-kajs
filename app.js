@@ -620,7 +620,10 @@
     else h += card(mahi() ? 'Toyota co op pay' : 'Summer job pay', `<label class="f">Pay per check</label><input type="text" inputmode="decimal" data-path="budget.summer.pay" data-t="n" data-re="1" value="${b.pay || ''}"><label class="f">How often</label><select data-path="budget.summer.freq" data-t="s" data-re="1">${[['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Monthly']].map((o) => `<option value="${o[0]}" ${b.freq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted">About ${fm(incomeOf('summer'))} a month.</p>`);
     h += card('Weekly spending money', `<input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}"><p class="muted small">One limit for food, Amazon, and anything else that is not a bill. About ${fm(poolMonth(m))} a month.</p>`);
     h += card('Spending types', '<p class="muted small">The kinds of things your weekly money goes to. Rename them or add your own.</p>' + S.cats.map((c, i) => c.kind !== 'flex' ? '' : `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" value="${esc(c.name)}">${c.id === 'other' ? '' : `<button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button>`}</div>`).join('') + '<button class="mt btn" data-act="addType">Add a type</button>');
-    h += card('Monthly bills and fixed costs', S.cats.filter((c) => c.kind === 'fixed').map((c) => `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join(''));
+    h += card('Monthly bills and fixed costs', S.cats.map((c, i) => c.kind !== 'fixed' ? '' : c.custom
+      ? `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" data-re="1" value="${esc(c.name)}" aria-label="Name"><button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button></div><input type="text" class="mt8" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}" aria-label="${esc(c.name)} amount">`
+      : `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join('') +
+      '<button class="mt btn" data-act="addFixed">Add a bill</button><p class="muted small mt8">For anything you pay every month, like Amazon Prime. It counts toward your monthly bills, not your weekly money.</p>');
     h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>`);
     const lo = LO();
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
@@ -1282,12 +1285,20 @@
       }
       save(); render(); toast(fm(amt) + ' added to savings');
     },
+    addFixed() {
+      const id = uid(), at = S.cats.findIndex((c) => c.kind === 'flex');
+      S.cats.splice(at < 0 ? S.cats.length : at, 0, { id, name: 'New bill', kind: 'fixed', custom: true });
+      ['school', 'summer'].forEach((m) => { S.budget[m].amounts[id] = 0; });
+      save(); render();
+      setTimeout(() => { const el = document.querySelector(`input[aria-label="New bill amount"]`); const nm = el && el.previousElementSibling && el.previousElementSibling.querySelector('input'); if (nm) { nm.focus(); nm.select(); } }, 50);
+    },
     addType() { S.cats.splice(S.cats.findIndex((c) => c.id === 'other'), 0, { id: uid(), name: 'New type', kind: 'flex' }); save(); render(); },
     delType(d) {
       const n = S.expenses.filter((e) => e.cat === d.id).length, c = S.cats.find((x) => x.id === d.id); if (!c) return;
       if (!confirm(n ? 'Remove ' + c.name + '? Its ' + n + ' purchase' + (n === 1 ? '' : 's') + ' will move to Other.' : 'Remove ' + c.name + '?')) return;
       S.expenses.forEach((e) => { if (e.cat === d.id) e.cat = 'other'; });
       S.rules.forEach((r) => { if (r.cat === d.id) r.cat = 'other'; });
+      if (c.kind === 'fixed') ['school', 'summer'].forEach((m) => { delete S.budget[m].amounts[c.id]; });
       S.cats = S.cats.filter((x) => x !== c); save(); render();
     },
     weekDetail() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = 0; render(); window.scrollTo(0, 0); },
