@@ -140,3 +140,11 @@ html[data-theme=mint]{--g:#059669;--y:#d97706;--r:#dc2626}
 .logrow .pill{margin-left:0;flex:none;min-width:64px;text-align:center}
 .tabbar button{position:relative}
 .ndot{position:absolute;top:6px;left:calc(50% + 10px);width:10px;height:10px;border-radius:50%;background:var(--blue);border:2px solid var(--card)}
+
+.item .row > b,.item .row > span:not(.t):last-child,.row.item > b{white-space:nowrap}
+.row.item > span:first-child,.item .row > .t{min-width:0}
+details.more{margin-top:14px;border-top:1px solid var(--line);padding-top:6px}
+details.more > summary{cursor:pointer;font-weight:700;color:var(--blue);padding:10px 0;list-style:none}
+details.more > summary::-webkit-details-marker{display:none}
+details.more > summary .muted{font-weight:500;display:block;margin-top:2px}
+.sheetbar{position:sticky;bottom:calc(-28px - var(--safe-b));background:var(--card);margin:14px -22px calc(-28px - var(--safe-b));padding:12px 22px calc(14px + var(--safe-b));border-top:1px solid var(--line);z-index:2}

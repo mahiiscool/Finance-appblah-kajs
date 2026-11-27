@@ -1,5 +1,52 @@
 [
   {
+    "v": 30,
+    "date": "2026-11-27",
+    "title": "Easier to use",
+    "items": [
+      {
+        "type": "change",
+        "text": "Adding an expense is faster: amount, type, note, then Save. The Save button always stays on screen. Date, card, refund, someone else, savings, and trip are under More options."
+      },
+      {
+        "type": "change",
+        "text": "Log spending and I got paid sit right under your weekly money on Home."
+      },
+      {
+        "type": "change",
+        "text": "The School year and Summer switch moved off Home so a stray tap cannot change your budget. It is now at the top of Budget and income, and Home shows which one you are on."
+      },
+      {
+        "type": "change",
+        "text": "Backup and subscription reminders are now in the To do card instead of separate cards."
+      },
+      {
+        "type": "change",
+        "text": "Home hides empty cards: Owed to me with nothing owed, Next bill due with no due days, and a takeout streak of 0."
+      },
+      {
+        "type": "change",
+        "text": "Budget, Month is clearer: Savings pull shows made, needed, and what to pull, and Month result no longer shows a second, different left over number while the month is still going."
+      },
+      {
+        "type": "change",
+        "text": "Plan check moved to the top of Budget and income so you see your numbers first."
+      },
+      {
+        "type": "fix",
+        "text": "Money amounts no longer wrap onto two lines."
+      },
+      {
+        "type": "fix",
+        "text": "Months from before you started logging paychecks no longer show missed pay."
+      },
+      {
+        "type": "new",
+        "text": "Empty IOU list explains how IOUs get added."
+      }
+    ]
+  },
+  {
     "v": 29,
     "date": "2026-11-27",
     "title": "Savings pull on the 1st",

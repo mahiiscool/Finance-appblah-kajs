@@ -200,13 +200,15 @@
   const checkFor = (mk) => (modeFor(mk) === 'summer' ? S.budget.summer.pay || 0 : C.round2(incomeOf('school') / (PER_MONTH[freqFor(mk)] || 1)));
   function paydaysIn(mk, upTo) {
     const pays = (S.paychecks || []).map((x) => x.date).sort(); if (!pays.length) return null;
-    const f = freqFor(mk), end = mk + '-' + pad(dim(mk)), last = upTo && upTo < end ? upTo : end, out = [];
+    const f = freqFor(mk), end = mk + '-' + pad(dim(mk)), last = upTo && upTo < end ? upTo : end, out = [], anchor = pays[0];
+    if (end < anchor) return null;
+    const from = mk + '-01' > anchor ? mk + '-01' : anchor;
     if (f === 'weekly' || f === 'biweekly') {
-      const step = f === 'weekly' ? 7 : 14, anchor = pays[0];
-      let d = C.addDays(anchor, Math.ceil(C.daysBetween(anchor, mk + '-01') / step) * step);
+      const step = f === 'weekly' ? 7 : 14;
+      let d = C.addDays(anchor, Math.ceil(C.daysBetween(anchor, from) / step) * step);
       for (; d <= last; d = C.addDays(d, step)) out.push(d);
-    } else if (f === 'semimonthly') [mk + '-15', end].forEach((d) => { if (d <= last) out.push(d); });
-    else if (end <= last) out.push(end);
+    } else if (f === 'semimonthly') [mk + '-15', end].forEach((d) => { if (d >= from && d <= last) out.push(d); });
+    else if (end >= from && end <= last) out.push(end);
     return out;
   }
   // Everything the 1st of the month needs: what came in, what went out, pay missed, and what to pull from savings.
@@ -454,6 +456,12 @@
   function todoItems() {
     const t = C.today(), mk = C.monthKey(t), day = +t.slice(8), last = C.shiftMonthKey(mk, -1), lo = LO(), out = [];
     const add = (k, text, act, btn, data, cls) => { if (!S.dismissed['todo' + k + t]) out.push({ k, text, act, btn, data: data || {}, cls }); };
+    // back up, at least once a week
+    const lb = S.lastBackup;
+    if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7)) add('bk', lb ? `It has been ${C.daysBetween(lb, t)} days since your last backup. Your data only lives on this phone, so save a backup to iCloud Drive.` : 'You have not backed up yet. Your data only lives on this phone, so save a backup to iCloud Drive.', 'exportBackup', 'Back up now', {}, lb ? 'y' : 'r');
+    // subscriptions to look over
+    const sd = subsDue();
+    if (sd.length) add('subs' + mk, `${sd.length} subscription${sd.length === 1 ? '' : 's'} to look over: ${esc(sd.slice(0, 3).map((x) => x.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?`, 'openMore', 'Review', { v: 'bills' });
     // refunds you are waiting on
     S.expenses.filter((e) => e.refundPending).sort((a, c) => (a.date < c.date ? -1 : 1)).forEach((e) => {
       const d = C.daysBetween(e.pendSince || e.date, t);
@@ -503,11 +511,10 @@
   }
   function Home() {
     const t = C.today(), mk = C.monthKey(t), b = budgetOf();
-    let h = `<div class="head"><h1 class="title">Home</h1><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div><div class="sub">${C.longDate(t)}</div>`;
-    h += `<div class="seg"><button class="${S.mode === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${S.mode === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
+    let h = `<div class="head"><h1 class="title">Home</h1><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div><div class="sub">${C.longDate(t)}, ${S.mode === 'school' ? 'school year' : 'summer'} budget</div>`;
 
     const ws = C.weekStart(t);
-    h += card('Spending money this week', weekHero(ws, true) + weekBreakdown(ws) + '<div class="btns"><button class="btn" data-act="weekDetail">This week</button><button class="btn primary" data-act="add">Log spending</button></div>');
+    h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn primary" data-act="add">Log spending</button><button class="btn" data-act="paycheck">I got paid</button></div>' + weekBreakdown(ws) + '<button class="mt8 btn small" data-act="weekDetail">See this week\'s purchases</button>');
     h += todoCard();
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
@@ -518,10 +525,6 @@
     } else if (S.setupV >= 2 && !S.dismissed['gap' + C.monthKey(t)]) {
       const gaps = setupGaps();
       if (gaps.length) h += card('Still missing', gaps.map((x) => `<button class="mrow" data-act="openMore" data-v="${x[1]}"><span>${x[0]}</span><span class="chev">&rsaquo;</span></button>`).join('') + '<button class="mt btn small" data-act="dismissGaps">Hide for this month</button>');
-    }
-    const lb = S.lastBackup;
-    if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7) && !S.dismissed['bk' + t]) {
-      h += card('Back up your data', `<p class="med">${lb ? 'It has been ' + C.daysBetween(lb, t) + ' days since your last backup.' : 'You have not backed up yet.'}</p><p class="muted small">Your data only lives on this phone. If Safari clears it or you lose the phone, a backup is the only way to get it back. Save the file to iCloud Drive.</p><div class="btns"><button class="btn" data-act="dismissBackup">Tomorrow</button><button class="btn primary" data-act="exportBackup">Back up now</button></div>`, lb ? '' : 'warn');
     }
     if (cardsOwed() > payPool() && cardsOwed() > 0) {
       h += card('Card warning', `<p class="med r">Cards owe ${fm(cardsOwed())}</p><p>${payName()} has ${fm(payPool())}. You are short ${fm(cardsOwed() - payPool())} before you pay them off.</p>`, 'warn');
@@ -538,17 +541,15 @@
 
     const owed = S.ious.filter((i) => !i.settled && i.dir === 'owedToMe');
     const od = owed.filter((i) => C.daysBetween(i.date, t) > 14).length;
-    h += card('Owed to me', `<p class="big">${fm(sum(owed, remaining))}</p><p class="${od ? 'r' : 'muted'}">${od ? od + ' unpaid for over 14 days' : owed.length + ' open'}</p>`);
+    if (owed.length) h += card('Owed to me', `<p class="big">${fm(sum(owed, remaining))}</p><p class="${od ? 'r' : 'muted'}">${od ? od + ' unpaid for over 14 days' : owed.length + ' open'}</p>`);
 
     const nb = nextBill();
-    h += card('Next bill due', nb ? `<p class="med ${nb.overdue ? 'r' : ''}">${esc(nb.b.name)}, ${fm(nb.b.amount)}</p><p class="muted">${nb.overdue ? 'Overdue since ' : 'Due '}${C.shortDate(nb.date)}</p>` : '<p class="muted">Set due days in Recurring bills to see this.</p><button class="mt btn" data-act="openMore" data-v="bills">Recurring bills</button>');
+    if (nb) h += card('Next bill due', nb ? `<p class="med ${nb.overdue ? 'r' : ''}">${esc(nb.b.name)}, ${fm(nb.b.amount)}</p><p class="muted">${nb.overdue ? 'Overdue since ' : 'Due '}${C.shortDate(nb.date)}</p>` : '<p class="muted">Set due days in Recurring bills to see this.</p><button class="mt btn" data-act="openMore" data-v="bills">Recurring bills</button>');
 
-    const sd = subsDue();
-    if (sd.length && !S.dismissed['subs' + mk]) h += card('Subscription check', `<p class="med">${sd.length} subscription${sd.length === 1 ? '' : 's'} to review</p><p class="muted">${esc(sd.slice(0, 3).map((b) => b.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?</p><div class="btns"><button class="btn" data-act="dismissSubs">Later</button><button class="btn primary" data-act="openMore" data-v="bills">Review</button></div>`);
     const st = takeoutStreak();
-    h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food purchase.' : 'No food logged yet.'}</p>`);
+    if (st.has && st.days >= 1) h += card('Takeout streak', `<p class="big">${st.days} day${st.days === 1 ? '' : 's'}</p><p class="muted">${st.has ? 'Since your last food purchase.' : 'No food logged yet.'}</p>`);
 
-    h += `<button class="mb14 btn primary" data-act="paycheck">I got paid</button><div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
+    h += `<div class="btns"><button class="btn" data-act="openMore" data-v="afford">Can I afford this?</button><button class="btn" data-act="openMore" data-v="recap">Reports</button></div>`;
     return h;
   }
 
@@ -583,7 +584,8 @@
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
-    { const co = closeOut(mk), row = (l, v, cls, sub) => `<div class="row item"><span>${l}${sub ? `<br><span class="muted small">${sub}</span>` : ''}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
+    if (mk < LO().start) h += card('Savings pull', `<p class="muted">Savings tracking starts ${C.monthName(LO().start)}, so there is nothing to pull for this month.</p>`);
+    else { const co = closeOut(mk), row = (l, v, cls, sub) => `<div class="row item"><span>${l}${sub ? `<br><span class="muted small">${sub}</span>` : ''}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
       let inner = row(co.done ? 'You made' : 'Made so far', co.made, '', co.typed ? 'The income you typed' : co.checks !== null ? `Paychecks logged. ${co.checks} payday${co.checks === 1 ? '' : 's'}${co.done ? '' : ' so far'}, usually about ${fm(co.expected)}` : 'Paychecks logged');
       if (co.missed) inner += row('Pay missed', co.missed, 'r', 'Usual paychecks minus what you logged');
       inner += row('You need', co.need, '', `Bills ${fm(co.bills)} plus weekly money ${fm(co.weekly)} (${co.weeks} weeks)`);
@@ -597,6 +599,7 @@
         if (co.still >= 1) inner += `<button class="mt8 btn small" data-act="pullSav" data-mk="${mk}" data-amt="${co.still}">I pulled ${fm(co.still)}</button>`;
       }
       if (co.done && !co.noPay && Math.abs(co.realShort - co.pull) >= 1) inner += `<p class="muted small mt8">Going by what you actually spent (${fm(co.out)}), you were ${co.realShort ? fm(co.realShort) + ' short' : 'not short'}. ${co.realShort < co.pull ? 'You could pull less.' : 'You may need to pull a little more.'}</p>`;
+      inner += `<div class="btns mt8"><button class="btn small" data-act="fixIncome" data-mk="${mk}">Set this month's income</button>${S.timeOffOn ? `<button class="btn small" data-act="offSheet" data-mk="${mk}">${offOf(mk) ? 'Edit time off' : 'Plan time off'}</button>` : ''}</div>`;
       h += card('Savings pull', inner);
     }
     const op = offPlan(mk);
@@ -611,8 +614,8 @@
     }
     h += card('Spent vs budget', rows);
     { const o = monthOver(mk), done = mk < C.monthKey(C.today());
-      const inote = incomeNote(mk);
-      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<div class="btns"><button class="btn small" data-act="fixIncome" data-mk="${mk}">Set this month's income</button>${S.timeOffOn ? `<button class="btn small" data-act="offSheet" data-mk="${mk}">${offOf(mk) ? 'Edit time off' : 'Plan time off'}</button>` : ''}</div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
+      const inote = incomeNote(mk), est = inote && !/set this/.test(inote);
+      h += card('Month result', `${done ? `<div class="row item"><span>${o.lv >= 0 ? 'Saved this month' : 'Over your income'}${est ? '<span class="pill y">Estimate</span>' : ''}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div>${est ? `<p class="muted small">${inote}</p>` : ''}` : ''}<div class="row item"><span>Spent${done ? '' : ' so far'}</span><b>${fm(o.out)}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
     const fs = sum(S.expenses.filter((e) => e.paidFromSavings && C.monthKey(e.date) === mk), (e) => e.amount);
     const fo = sum(S.expenses.filter((e) => e.forOther && C.monthKey(e.date) === mk), (e) => e.amount);
     const hh = sum(S.expenses.filter((e) => e.household && C.monthKey(e.date) === mk), (e) => e.amount);
@@ -660,7 +663,7 @@
       return card(title, items.length ? items.map((i) => {
         const age = C.daysBetween(i.date, t), late = age > 14;
         return `<div class="item"><div class="row"><span class="t ${late ? 'r' : ''}">${esc(i.person)}</span><b class="${late ? 'r' : ''}">${fm(remaining(i))}</b></div><div class="muted small">${esc(i.reason || 'No reason')}, ${C.shortDate(i.date)}${late ? `<span class="pill r">${age} days unpaid</span>` : ''}${i.payments.length ? `<span class="pill g">Paid ${fm(sum(i.payments, (p) => p.amount))} of ${fm(i.amount)}</span>` : ''}</div><div class="btns"><button class="btn small" data-act="payIou" data-id="${i.id}">Payment</button><button class="btn small" data-act="settleIou" data-id="${i.id}">Settle</button>${i.dir === 'owedToMe' ? `<button class="btn small" data-act="forgiveSheet" data-id="${i.id}">Forgive</button>` : ''}<button class="btn small danger" data-act="delIou" data-id="${i.id}">Delete</button></div></div>`;
-      }).join('') : '<p class="muted">Nothing here.</p>');
+      }).join('') : `<p class="muted">Nothing here.</p>${dir === 'owedToMe' ? '<p class="muted small">Tip: when you log a purchase, open More options and tick Bought for someone else. It shows up here on its own.</p>' : ''}`);
     };
     h += list('owedToMe', 'They owe me') + list('iOwe', 'I owe them');
     const done = S.ious.filter((i) => i.settled).slice(-5).reverse();
@@ -794,8 +797,10 @@
 
   function BudgetEditView() {
     const m = S.mode, b = budgetOf();
-    let h = back() + `<h1 class="title">Budget and income</h1><div class="sub">Editing ${m === 'school' ? 'School year' : 'Summer'} mode</div>`;
-    h += `<div class="seg"><button class="${m === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${m === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div>`;
+    let h = back() + `<h1 class="title">Budget and income</h1><div class="sub">Your income, bills, and weekly money</div>`;
+    h += `<p class="label">Budget you are on right now</p><div class="seg"><button class="${m === 'school' ? 'on' : ''}" data-act="mode" data-m="school">School year</button><button class="${m === 'summer' ? 'on' : ''}" data-act="mode" data-m="summer">Summer</button></div><p class="muted small mb14">Switch when school ends or summer starts. Everything below is the ${m === 'school' ? 'school year' : 'summer'} budget.</p>`;
+    const inc = incomeOf(m), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv);
+    h += card('Plan check, about a month', `<div class="row"><span>Income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending</span><b>${fm(sp)}</b></div><div class="row"><span>Savings</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Left over to savings'}</span><b class="${left < 0 ? 'r' : left === 0 ? 'g' : ''}">${fm(left)}</b></div>`);
     if (m === 'school') h += card('Income', `<label class="f">Monthly paycheck income</label><input type="text" inputmode="decimal" data-path="budget.school.income" data-t="n" data-re="1" value="${b.income}"><label class="f">How often you get paid</label><select data-path="payFreq" data-t="s" data-re="1">${FREQS.map((o) => `<option value="${o[0]}" ${S.payFreq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted small">Bonus money like tips is logged separately and never counted as income.</p>`);
     else h += card(mahi() ? 'Toyota co op pay' : 'Summer job pay', `<label class="f">Pay per check</label><input type="text" inputmode="decimal" data-path="budget.summer.pay" data-t="n" data-re="1" value="${b.pay || ''}"><label class="f">How often</label><select data-path="budget.summer.freq" data-t="s" data-re="1">${[['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['semimonthly', 'Twice a month'], ['monthly', 'Monthly']].map((o) => `<option value="${o[0]}" ${b.freq === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select><p class="muted">About ${fm(incomeOf('summer'))} a month.</p>`);
     h += card('Weekly spending money', `<input type="text" inputmode="decimal" data-path="budget.${m}.foodWeek" data-t="n" data-re="1" value="${b.foodWeek}"><p class="muted small">One limit for food, Amazon, and anything else that is not a bill. About ${fm(poolMonth(m))} a month.</p>`);
@@ -811,8 +816,6 @@
     h += card('Savings tracker', `<p class="muted small">Whatever is left at the end of each month counts as saved.</p><label class="f">Start counting from</label><input type="month" data-path="leftover.start" data-t="s" data-re="1" value="${lo.start}"><label class="f">Already saved this year before that</label><input type="text" inputmode="decimal" data-path="leftover.before" data-t="n" data-re="1" value="${lo.before || ''}" placeholder="0">`);
     const labels = { mom: mahi() ? 'Paying back Mom' : 'Payback goal', gen: 'General savings', trip: 'Trip fund' };
     h += card('Monthly savings targets', Object.keys(b.savings).map((k) => `<label class="f">${labels[k] || k}</label><input type="text" inputmode="decimal" data-path="budget.${m}.savings.${k}" data-t="n" data-re="1" value="${b.savings[k]}">`).join(''));
-    const inc = incomeOf(m), sp = plannedSpend(), sv = plannedSavings(), left = C.round2(inc - sp - sv);
-    h += card('Plan check', `<div class="row"><span>Income</span><b>${fm(inc)}</b></div><div class="row"><span>Spending</span><b>${fm(sp)}</b></div><div class="row"><span>Savings</span><b>${fm(sv)}</b></div><div class="row"><span>${left < 0 ? 'Over plan by' : 'Left over to savings'}</span><b class="${left < 0 ? 'r' : left === 0 ? 'g' : ''}">${fm(left)}</b></div>`);
     return h;
   }
 
@@ -1274,10 +1277,11 @@
     ui.rcpt = null; ui.rcptDel = false; ui.rcptFor = e ? e.id : null;
     openSheet(`<h2>${e ? (e.amount < 0 ? 'Edit refund' : 'Edit expense') : 'Add expense'}</h2><form data-form="expense"><input type="hidden" name="id" value="${id || ''}">
       <input class="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${e ? Math.abs(e.amount).toFixed(2) : ''}" required>
-      <label class="check"><input type="checkbox" name="refund" ${e && e.amount < 0 ? 'checked' : ''}>Refund or return, money came back</label>
       <label class="f">Spending money</label><div class="chips">${S.cats.filter((c) => c.kind === 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Bills and gas</label><div class="chips">${S.cats.filter((c) => c.kind !== 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
-      <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional" value="${esc(e ? e.note : '')}">
+      <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional, like Chipotle" value="${esc(e ? e.note : '')}">
+      <details class="more" ${e ? 'open' : ''}><summary>More options <span class="muted small">date, card, refund, someone else, savings</span></summary>
+      <label class="check"><input type="checkbox" name="refund" ${e && e.amount < 0 ? 'checked' : ''}>Refund or return, money came back</label>
       <label class="f">Receipt photo</label><div id="rcptbox">${rcptBoxHTML()}</div><input type="file" id="rcptfile" accept="image/*" hidden>
       <label class="f">Card or account</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === acct ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash" ${acct === 'cash' ? 'selected' : ''}>Cash or other</option></select>
       <label class="f">Date</label><input type="date" name="date" value="${e ? e.date : C.today()}">
@@ -1288,8 +1292,8 @@
       <label class="check"><input type="checkbox" name="household" ${e && e.household ? 'checked' : ''}>Household charge, ignore it</label>
       ${e && e.amount > 0 ? `<label class="check"><input type="checkbox" name="pending" ${e.refundPending ? 'checked' : ''}>I returned this, waiting on the refund</label>` : ''}
       ${e && e.cat === 'insurance' && e.amount > 0 ? `<label class="check"><input type="checkbox" name="fromFund" ${e.fromFund ? 'checked' : ''}>The real insurance bill, paid from the insurance fund</label>` : ''}
-      <div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>
-      ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
+      ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete ${e.amount < 0 ? 'refund' : 'expense'}</button>` : ''}</details>
+      <div class="btns sheetbar"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
     const a = $('#sheet input[name=amount]'); if (a && !e) setTimeout(() => a.focus(), 50);
     if (preCat === 'gas' && !e) { const h2 = $('#sheet h2'); if (h2) h2.textContent = 'Log a fill up'; }
   }
@@ -1515,7 +1519,8 @@
         S.modeLog = S.modeLog || [{ mk: '0000-00', mode: S.mode }];
         S.modeLog = S.modeLog.filter((x) => x.mk !== mk); S.modeLog.push({ mk, mode: d.m });
       }
-      S.mode = d.m; save(); render();
+      const was = S.mode; S.mode = d.m; save(); render();
+      if (was !== d.m) toast('Now on the ' + (d.m === 'school' ? 'school year' : 'summer') + ' budget');
     },
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
