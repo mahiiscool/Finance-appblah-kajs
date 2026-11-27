@@ -9,6 +9,10 @@ The in app What's new page (More tab) reads `changelog.json`. With every commit 
 4. Bump the `CACHE` version in `sw.js`.
 
 Several small changes on the same day can share one entry.
+5. Lines only about Mahi's own budget (his numbers, Mom, Dad) get `"who": "mahi"` so other people never see them. An entry whose title is Mahi only gets a `"titleAll"` for everyone else.
+
+## Other people use this app
+Mahi's girlfriend uses it on her own phone with the blank setup (persona `blank`) and never sees the chat. Anything Mahi specific must check `mahi()`. When a feature is added or changes, update the `GUIDE` list in app.js (the How to use this app page) in plain words, and the `TOUR` if it changes the basics.
 
 ## Saved data
 The app is installed on Mahi's iPhone with real data. Never change vault.js, the IndexedDB name, or the encryption. Any change to saved state goes in a one time migration run from `startSession`, safe to run twice.

@@ -148,3 +148,7 @@ details.more > summary{cursor:pointer;font-weight:700;color:var(--blue);padding:
 details.more > summary::-webkit-details-marker{display:none}
 details.more > summary .muted{font-weight:500;display:block;margin-top:2px}
 .sheetbar{position:sticky;bottom:calc(-28px - var(--safe-b));background:var(--card);margin:14px -22px calc(-28px - var(--safe-b));padding:12px 22px calc(14px + var(--safe-b));border-top:1px solid var(--line);z-index:2}
+
+.helpbtn{font-size:22px;font-weight:800;font-family:inherit;line-height:1}
+
+#toast{bottom:auto;top:calc(var(--safe-t) + 12px);box-shadow:0 6px 20px rgba(0,0,0,.25)}

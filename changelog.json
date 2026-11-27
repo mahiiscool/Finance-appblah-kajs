@@ -1,5 +1,37 @@
 [
   {
+    "v": 31,
+    "date": "2026-11-27",
+    "title": "Help built in",
+    "items": [
+      {
+        "type": "new",
+        "text": "Tap the question mark at the top of Home for How to use this app: short answers for every feature, each with a button that takes you right there."
+      },
+      {
+        "type": "new",
+        "text": "A quick 5 step tour shows once after this update. You can see it again from the help page."
+      },
+      {
+        "type": "change",
+        "text": "Pop up messages now show at the top of the screen so they never cover buttons."
+      },
+      {
+        "type": "fix",
+        "text": "On a new phone, the first screen asks who is using the app before the PIN, and Skip, no PIN now gives the right setup."
+      },
+      {
+        "type": "fix",
+        "text": "A brand new setup no longer shows update messages meant for an older version."
+      },
+      {
+        "type": "fix",
+        "text": "Mahi's own budget lines are hidden for everyone else, in Settings and in What's new.",
+        "who": "mahi"
+      }
+    ]
+  },
+  {
     "v": 30,
     "date": "2026-11-27",
     "title": "Easier to use",
@@ -150,7 +182,8 @@
     "items": [
       {
         "type": "fix",
-        "text": "Months with five weeks now get five weeks of spending money. November is 300, not 260, so staying under every week never shows the month as over."
+        "text": "Months with five weeks now get five weeks of spending money. November is 300, not 260, so staying under every week never shows the month as over.",
+        "who": "mahi"
       },
       {
         "type": "new",
@@ -328,7 +361,8 @@
       },
       {
         "type": "change",
-        "text": "Counting started the week of Nov 22, so older weeks do not count against you."
+        "text": "Counting started the week of Nov 22, so older weeks do not count against you.",
+        "who": "mahi"
       }
     ]
   },
@@ -350,13 +384,15 @@
     "items": [
       {
         "type": "change",
-        "text": "Mom payback is now a strict 150 a month bill."
+        "text": "Mom payback is now a strict 150 a month bill.",
+        "who": "mahi"
       },
       {
         "type": "new",
         "text": "Whatever is left at the end of each month counts as saved, with a running total for the year."
       }
-    ]
+    ],
+    "titleAll": "Yearly savings"
   },
   {
     "v": 17,
@@ -380,7 +416,8 @@
     "items": [
       {
         "type": "change",
-        "text": "All non bill spending now shares one weekly limit of 60 instead of separate monthly amounts."
+        "text": "All non bill spending now shares one weekly limit of 60 instead of separate monthly amounts.",
+        "who": "mahi"
       },
       {
         "type": "change",
@@ -399,11 +436,13 @@
       },
       {
         "type": "change",
-        "text": "Removed Dad's payment from the budget. Old history stays."
+        "text": "Removed Dad's payment from the budget. Old history stays.",
+        "who": "mahi"
       },
       {
         "type": "change",
-        "text": "Updated the monthly budget numbers without touching any saved data."
+        "text": "Updated the monthly budget numbers without touching any saved data.",
+        "who": "mahi"
       }
     ]
   },
@@ -552,7 +591,8 @@
       },
       {
         "type": "new",
-        "text": "I'm not Mahi button for a blank setup anyone can use."
+        "text": "I'm not Mahi button for a blank setup anyone can use.",
+        "who": "mahi"
       }
     ]
   }

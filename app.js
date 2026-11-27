@@ -511,7 +511,7 @@
   }
   function Home() {
     const t = C.today(), mk = C.monthKey(t), b = budgetOf();
-    let h = `<div class="head"><h1 class="title">Home</h1><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div><div class="sub">${C.longDate(t)}, ${S.mode === 'school' ? 'school year' : 'summer'} budget</div>`;
+    let h = `<div class="head"><h1 class="title">Home</h1><div class="row g8"><button class="icon-btn helpbtn" data-act="openMore" data-v="guide" aria-label="How to use this app">?</button><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div></div><div class="sub">${C.longDate(t)}${mahi() || S.mode === 'summer' ? ', ' + (S.mode === 'school' ? 'school year' : 'summer') + ' budget' : ''}</div>`;
 
     const ws = C.weekStart(t);
     h += card('Spending money this week', weekHero(ws, true) + '<div class="btns"><button class="btn primary" data-act="add">Log spending</button><button class="btn" data-act="paycheck">I got paid</button></div>' + weekBreakdown(ws) + '<button class="mt8 btn small" data-act="weekDetail">See this week\'s purchases</button>');
@@ -719,10 +719,44 @@
     let h = back() + `<h1 class="title">What's new</h1><div class="sub">Every update, newest first</div>`;
     if (!LOG) { loadLog(true); return h + card('', '<p class="muted">Loading the list. You need internet the first time.</p>'); }
     const seen = S.logSeen || 0;
-    h += LOG.slice().sort((a, b) => (b.v || 0) - (a.v || 0)).map((x) => card(C.longDate(x.date), `<p class="med">${esc(x.title || '')}${(x.v || 0) > seen ? '<span class="pill b">New</span>' : ''}</p>` +
-      (x.items || []).map((i) => { const t = LOG_TYPES[i.type] || LOG_TYPES.change; return `<div class="logrow"><span class="pill ${t[1]}">${t[0]}</span><span>${esc(i.text || '')}</span></div>`; }).join(''))).join('');
+    h += LOG.slice().filter((x) => mahi() || (x.items || []).some((i) => i.who !== 'mahi')).sort((a, b) => (b.v || 0) - (a.v || 0)).map((x) => card(C.longDate(x.date), `<p class="med">${esc((!mahi() && x.titleAll) || x.title || '')}${(x.v || 0) > seen ? '<span class="pill b">New</span>' : ''}</p>` +
+      (x.items || []).filter((i) => mahi() || i.who !== 'mahi').map((i) => { const t = LOG_TYPES[i.type] || LOG_TYPES.change; return `<div class="logrow"><span class="pill ${t[1]}">${t[0]}</span><span>${esc(i.text || '')}</span></div>`; }).join(''))).join('');
     if (logTop() > seen) { S.logSeen = logTop(); save(); }
     return h;
+  }
+  // ---------- how to use this app ----------
+  const GUIDE = [
+    ['Your weekly money', 'The ring on Home is how much you have left to spend this week on everything that is not a bill: food, fun, shopping. A new week starts every Sunday. Green means you are fine, yellow means slow down, red means you went over.', [['Open this week', 'weekDetail', {}]]],
+    ['Log what you spend', 'Tap the blue plus button at the bottom. Type the amount, tap what it was for, and Save. That is it. More options has the date, which card you used, refunds, and buying for someone else.', [['Log something', 'add', {}]]],
+    ['Payday', 'Every time you get paid, tap I got paid on Home and type the amount that landed in your account. The app shows where the paycheck should go. Logging every paycheck is what lets the app tell you if you came up short.', [['I got paid', 'paycheck', {}]]],
+    ['Bills', 'Your monthly bills live in More, Recurring bills. Check a bill off when you pay it. Give each one a due day and the app reminds you before it is due.', [['Recurring bills', 'openMore', { v: 'bills' }]]],
+    ['The To do card', 'Home shows a To do card when something needs you: a paycheck to log, a bill past due, a refund you are waiting on, a backup. Tap the button to do it, or Later to hide it until tomorrow. The app keeps track so you do not have to.', []],
+    ['Going over', 'If you spend more than your weekly money, next week starts with that much less. If a week goes really bad, use Cover with savings on Home instead. You can turn this off in Budget and income, under Rollover.', []],
+    ['The 1st of the month', 'On the 1st, Home looks at last month: what you made versus what the month needed. If you came up short, it tells you exactly how much to pull from savings. Tap I pulled it and your balances update.', [['See this month', 'bview', { v: 'month', go: 1 }]]],
+    ['Refunds and returns', 'Returned something? Open that purchase and tick I returned this, waiting on the refund. Home reminds you until it comes back. When it does, tap It came and the money goes back into that week.', []],
+    ['Paying for someone else', 'When you pay for a friend, open More options and tick Bought for someone else. It does not count against you, and it shows up in IOUs. If they never pay you back, tap Forgive.', [['Open IOUs', 'tab', { t: 'ious' }]]],
+    ['Savings goals', 'The Goals tab has your savings goals, like a trip fund. On a trip, tick Trip spending on purchases so they come out of the trip fund, not your weekly money.', [['Open Goals', 'tab', { t: 'goals' }]]],
+    ['Your bank statement', 'You can import transactions from your bank as a CSV file, or a screenshot. The app sorts them, skips duplicates, and lists money coming in unchecked so you only tick real refunds.', [['Import', 'openMore', { v: 'import' }]]],
+    ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
+    ['Back up', 'Your data only lives on this phone. Back up every week and save the file to iCloud Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
+    ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
+  ];
+  function GuideView() {
+    return back() + `<h1 class="title">How to use this app</h1><div class="sub">Short answers. Tap a button to jump there.</div>` +
+      `<button class="mb16 btn primary" data-act="tour">Show the quick tour again</button>` +
+      GUIDE.map((g) => card(g[0], `<p>${g[1]}</p>${g[2].length ? `<div class="btns">${g[2].map((b) => `<button class="btn small" data-act="${b[1]}" ${Object.entries(b[2]).map(([k, v]) => `data-${k}="${v}"`).join(' ')}>${b[0]}</button>`).join('')}</div>` : ''}`)).join('');
+  }
+  // Short welcome tour shown once after setup.
+  const TOUR = [
+    ['Your weekly money', 'The ring on Home shows what you can still spend this week on food, fun, and everything that is not a bill. It resets every Sunday.'],
+    ['Log as you go', 'Tap the blue plus at the bottom right after you buy something. Amount, what it was for, Save. Takes five seconds.'],
+    ['Log every paycheck', 'Tap I got paid on Home each payday. That is how the app knows if a month came up short and how much to pull from savings.'],
+    ['Check the To do card', 'When something needs you, Home shows it in a To do card. Tap the button and the app does the math.'],
+    ['Help is always here', 'Tap the question mark at the top of Home any time for a short guide to every feature.']
+  ];
+  function tour() {
+    if (!S) return; ui.tourI = ui.tourI || 0; const i = ui.tourI, x = TOUR[i];
+    openSheet(`<p class="label">${i + 1} of ${TOUR.length}</p><h2>${x[0]}</h2><p class="mt8">${x[1]}</p><div class="btns mt"><button class="btn" data-act="tourEnd">${i === TOUR.length - 1 ? 'Close' : 'Skip'}</button><button class="btn primary" data-act="${i === TOUR.length - 1 ? 'tourEnd' : 'tourNext'}">${i === TOUR.length - 1 ? 'Got it' : 'Next'}</button></div>`);
   }
   function More() {
     const v = ui.more;
@@ -737,7 +771,8 @@
     if (v === 'security') return SecurityView();
     if (v === 'bank') return BankView();
     if (v === 'log') return LogView();
-    const rows = [['log', "What's new"], ['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
+    if (v === 'guide') return GuideView();
+    const rows = [['guide', 'How to use this app'], ['log', "What's new"], ['bills', 'Recurring bills'], ['household', mahi() ? "Dad's household bills" : 'Household bills'], ['cards', 'Cards and balances'], ['import', 'Import transactions'], ['afford', 'Can I afford this?'], ['recap', 'Weekly and monthly reports'], ['budgetEdit', 'Budget and income'], ['rules', 'Category rules'], ['security', 'Settings: theme, text size, PIN, backup'], ['bank', 'Automatic bank connection']];
     return `<div class="head"><h1 class="title">More</h1></div><div class="sub">Tools and settings</div>` + card('', `<div class="menu">${rows.map((r) => `<button class="mrow" data-act="openMore" data-v="${r[0]}"><span>${r[1]}${r[0] === 'log' && logUnread() ? '<span class="pill b">New</span>' : ''}</span><span class="chev">&rsaquo;</span></button>`).join('')}</div>`) + card('', '<button class="btn" data-act="paycheck">I got paid: plan this paycheck</button><button class="mt btn" data-act="quickSetup">Run setup again</button>');
   }
 
@@ -1070,7 +1105,7 @@
       card('Lock', V.isAuto() ? `<p class="muted">No lock is on. Anyone holding your unlocked phone can open this app.</p><div class="btns"><button class="btn primary" data-act="setPinNow">Set a PIN</button></div>` : `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><button class="btn mt" data-act="removePin">Remove PIN, no lock</button><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
-      card('Danger zone', '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p><button class="mt btn danger" data-act="erase">Erase all data</button>');
+      card('Danger zone', (mahi() ? '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p>' : '') + '<button class="mt btn danger" data-act="erase">Erase all data</button>');
   }
   async function fillFaceBox() {
     const box = $('#facebox'); if (!box) return;
@@ -1434,7 +1469,7 @@
     wiz(fd) {
       wizSave(ui.wiz, fd);
       const i = WIZ.indexOf(ui.wiz);
-      if (ui.wiz === 'done') { S.setupDone = true; S.setupV = 2; save(); closeSheet(); render(); toast('All set'); return; }
+      if (ui.wiz === 'done') { S.setupDone = true; S.setupV = 2; save(); closeSheet(); render(); toast('All set'); if (!S.tourDone) setTimeout(tour, 600); return; }
       save(); render(); wizShow(WIZ[i + 1]);
     },
     paycheck(fd) {
@@ -1456,9 +1491,10 @@
       save(); closeSheet(); render(); toast('Payment logged');
     },
     async setup(fd) {
+      const blank = fd.get('persona') === 'blank';
       if (fd.get('nolock')) {
         $('#lockbtn').disabled = true;
-        S = defaultState();
+        S = blank ? blankState() : defaultState();
         await V.createAuto(S);
         setPinHint(false);
         startSession();
@@ -1469,7 +1505,7 @@
       if (p !== p2) { err.textContent = 'PINs do not match'; return; }
       setPinHint(true);
       err.textContent = ''; $('#lockbtn').textContent = 'Creating'; $('#lockbtn').disabled = true;
-      S = fd.get('persona') === 'blank' ? blankState() : defaultState();
+      S = blank ? blankState() : defaultState();
       await V.create(p, S);
       startSession();
     },
@@ -1552,7 +1588,7 @@
       if (c.kind === 'fixed') ['school', 'summer'].forEach((m) => { delete S.budget[m].amounts[c.id]; });
       S.cats = S.cats.filter((x) => x !== c); save(); render();
     },
-    weekDetail() { ui.tab = 'budget'; ui.bview = 'week'; ui.wOff = 0; render(); window.scrollTo(0, 0); },
+    weekDetail() { ui.tab = 'budget'; ui.more = null; ui.bview = 'week'; ui.wOff = 0; render(); window.scrollTo(0, 0); },
     editExp(d) { addSheet(d.id); },
     delExp(d) {
       const e = S.expenses.find((x) => x.id === d.id); if (!e) return;
@@ -1564,7 +1600,7 @@
     },
     closeSheet() { closeSheet(); },
     sheetBg(d, el, ev) { if (ev.target === el) closeSheet(); },
-    bview(d) { ui.bview = d.v; render(); },
+    bview(d) { if (d.go) { ui.tab = 'budget'; ui.more = null; ui.mk = null; } ui.bview = d.v; render(); if (d.go) window.scrollTo(0, 0); },
     wnav(d) { ui.wOff = Math.min(0, ui.wOff + +d.d); render(); },
     mnav(d) { ui.mk = C.shiftMonthKey(ui.mk || C.monthKey(C.today()), +d.d); render(); },
     bnav(d) { ui.bmk = C.shiftMonthKey(ui.bmk || C.monthKey(C.today()), +d.d); render(); },
@@ -1605,7 +1641,7 @@
       S = Object.assign(blankState(), { expenses: S.expenses, ious: S.ious, accounts: S.accounts, lastBackup: S.lastBackup, paySource: S.paySource, lastAccount: S.lastAccount, dismissed: S.dismissed });
       save(); setupForm();
     },
-    setupSkip() { wizForm(); S.setupDone = true; S.dismissed.v2 = true; save(); closeSheet(); render(); },
+    setupSkip() { wizForm(); S.setupDone = true; S.dismissed.v2 = true; save(); closeSheet(); render(); if (!S.tourDone) setTimeout(tour, 600); },
     dismissV2() { S.dismissed.v2 = true; save(); render(); },
     dismissGaps() { S.dismissed['gap' + C.monthKey(C.today())] = true; save(); render(); },
     dismissSubs() { S.dismissed['subs' + C.monthKey(C.today())] = true; save(); render(); },
@@ -1682,6 +1718,9 @@
     },
     toggleTimeOff(d, el) { S.timeOffOn = el.checked; save(); render(); },
     toggleShort(d, el) { S.shortFromSav = el.checked; save(); render(); },
+    tour() { ui.tourI = 0; tour(); },
+    tourNext() { ui.tourI = (ui.tourI || 0) + 1; tour(); },
+    tourEnd() { ui.tourI = 0; S.tourDone = true; save(); closeSheet(); },
     todoLater(d) { S.dismissed['todo' + d.k + C.today()] = true; save(); render(); },
     balDone() { S.balCheck = C.monthKey(C.today()); save(); render(); toast('Nice. Fix any balance in Cards and balances if it was off.'); },
     refundCame(d) {
@@ -1899,6 +1938,7 @@
       if (exists && (await V.mode()) === 'auto') {
         try { const st = await V.unlockAuto(); S = Object.assign(defaultState(), st || {}); startSession(); return; } catch (e) { /* fall through to the normal screen */ }
       }
+      if (!exists) { welcome(); return; }
       const face = exists && (await V.faceEnabled());
       const pin = exists && getPinHint();
       $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="mt btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="mt btn" name="persona" value="blank" type="submit">I\'m not Mahi</button><p class="mt12 muted small">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="mt12 btn" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
@@ -1906,6 +1946,16 @@
       if (face && !forceUnlock) { /* user taps the button to start Face ID */ }
     });
   }
+  // First open on a new phone: pick who you are, then a PIN or no PIN.
+  function welcome() {
+    if (!ui.wpick) {
+      $('#app').innerHTML = `<div class="lock"><h1>Welcome</h1><p class="muted">A simple way to track your money. Everything stays on this phone. Nothing is sent anywhere.</p><p class="label mt">Who is using this app?</p><div class="col"><button class="btn primary" data-act="wPick" data-v="mahi">I'm Mahi</button><button class="btn" data-act="wPick" data-v="blank">I'm someone else</button></div><p class="muted small mt12">I'm Mahi loads Mahi's budget. Someone else starts blank, and a short setup asks for your own numbers.</p></div>`;
+      return;
+    }
+    $('#app').innerHTML = `<div class="lock"><h1>Create a PIN</h1><p class="muted">Choose a 6 digit PIN. It locks the app and encrypts your data. If you forget it, the data cannot be recovered, so keep a backup.</p><form data-form="setup"><input type="hidden" name="persona" value="${ui.wpick === 'blank' ? 'blank' : 'mahi'}"><input type="password" name="p" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="PIN" required><input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required><div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">Create</button><button class="mt btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button></form><button class="mt12 btn" data-act="wPick" data-v="">Back</button></div>`;
+    const p = $('input[name=p]'); if (p) setTimeout(() => p.focus(), 50);
+  }
+  actions.wPick = (d) => { ui.wpick = d.v || null; welcome(); };
   actions.faceUnlock = async () => {
     try { const st = await V.unlockFace(); S = Object.assign(defaultState(), st || {}); startSession(); }
     catch (e) { const err = $('#lockerr'); if (err) err.textContent = 'Face ID did not work. Use your passcode.'; }
@@ -1926,8 +1976,11 @@
       if (up) { sessionStorage.removeItem('moneyUpdated'); const u = JSON.parse(up); ui.tab = u.tab || 'home'; ui.more = u.more || null; setTimeout(() => { toast('Updated to the newest version'); if (ui.more === 'security') fillFaceBox(); }, 400); }
     } catch (e) {}
     render();
-    if (!S.setupDone && !S.expenses.length) { if (S.persona === 'blank') setupForm(); else setupStart(); }
+    if (!S.setupDone && !S.expenses.length) setupForm();
+    else if (!S.tourDone) setTimeout(tour, 500);
   }
+  // A brand new install has nothing to upgrade, so it gets no upgrade messages.
+  const fresh = () => !S.setupDone && !S.expenses.length;
   // One time update to Mahi's budget (November 2026). Only budget numbers change; all logged data stays.
   function applyBudgetNov2026() {
     if (S.persona === 'blank' || S.budgetNov2026) return;
@@ -1936,7 +1989,7 @@
     const bills = { Windscribe: 2, 'Google Photos': 2, Spotify: 12.99, 'Snapchat Premium': 5, Claude: 20, Phone: 54, Gym: 25, 'Flex pay': 53.66, 'Car insurance fund': 200 };
     S.bills.forEach((b) => { if (bills[b.name] !== undefined) b.amount = bills[b.name]; });
     S.budgetNov2026 = true; save();
-    setTimeout(() => toast('Budget updated: $943.47 a month'), 600);
+    if (!fresh()) setTimeout(() => toast('Budget updated: $943.47 a month'), 600);
   }
   // One time: Dad's payment is no longer part of the budget.
   function removeDadPayment() {
@@ -1945,7 +1998,7 @@
     S.bills = S.bills.filter((b) => b.cat !== 'dad');
     if (!S.expenses.some((e) => e.cat === 'dad')) S.cats = S.cats.filter((c) => c.id !== 'dad');
     S.noDadPay = true; save();
-    setTimeout(() => toast("Dad's payment removed: budget is $806.65 a month"), 700);
+    if (!fresh()) setTimeout(() => toast("Dad's payment removed: budget is $806.65 a month"), 700);
   }
   // One time: food, shopping, and other share one weekly limit instead of separate monthly amounts.
   function poolSpending() {
@@ -1953,7 +2006,7 @@
     ['school', 'summer'].forEach((m) => { S.cats.forEach((c) => { if (c.kind === 'flex') S.budget[m].amounts[c.id] = 0; }); if (S.persona !== 'blank') S.budget[m].foodWeek = 60; });
     if (S.persona !== 'blank') { const f = S.cats.find((c) => c.id === 'food'); if (f && f.name === 'Food and fun') f.name = 'Food'; }
     S.poolSpend = true; save();
-    setTimeout(() => toast('$60 a week now covers all your spending'), 800);
+    if (!fresh()) setTimeout(() => toast('$60 a week now covers all your spending'), 800);
   }
   // One time: add types for weekly spending money so purchases can be split by what they were.
   function addSpendTypes() {
@@ -1972,7 +2025,7 @@
     if (!S.bills.some((x) => x.cat === 'mompay')) S.bills.push({ id: 'bmom', name: 'Mom payback', amount: 150, day: null, cat: 'mompay' });
     LO().start = C.shiftMonthKey(C.monthKey(C.today()), 1);
     S.momStrict = true; save();
-    setTimeout(() => toast('Mom payback is now a strict $150 a month'), 900);
+    if (!fresh()) setTimeout(() => toast('Mom payback is now a strict $150 a month'), 900);
   }
   // One time: overspending in a week now comes out of the next week, starting this week.
   function overCarryOn() {
