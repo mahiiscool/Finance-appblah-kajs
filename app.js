@@ -11,7 +11,7 @@
   const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const fm = (n) => C.money(n);
   const mahi = () => !S || S.persona !== 'blank';
-  const catOpts = (sel) => S.cats.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + '<option value="__hh">Household (ignored)</option>';
+  const catOpts = (sel) => S.cats.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') + `<option value="__hh" ${sel === '__hh' ? 'selected' : ''}>Household (ignored)</option><option value="__insfund" ${sel === '__insfund' ? 'selected' : ''}>Insurance bill, paid from the fund</option>`;
   const pad = (n) => String(n).padStart(2, '0');
   const sum = (arr, f) => arr.reduce((a, x) => a + (f ? f(x) : x), 0);
   const MIN5 = 5 * 60 * 1000;
@@ -115,7 +115,7 @@
   // ---------- data helpers ----------
   const budgetOf = (m) => S.budget[m || S.mode];
   const catName = (id) => { if (id === '__hh') return 'Household (ignored)'; const c = S.cats.find((x) => x.id === id); return c ? c.name : 'Other'; };
-  const counted = (e) => !e.paidFromSavings && !e.forOther && !e.household;
+  const counted = (e) => !e.paidFromSavings && !e.forOther && !e.household && !e.fromFund;
   function incomeOf(mode) {
     const b = S.budget[mode];
     if (mode === 'school') return b.income;
@@ -133,6 +133,21 @@
   // Fixed categories are bills with their own monthly amounts.
   const isFlex = (cat) => { const c = S.cats.find((x) => x.id === cat); return !c || c.kind === 'flex'; };
   const poolMonth = (m) => C.round2((budgetOf(m).foodWeek || 0) * 52 / 12);
+  // Weeks run Sunday to Saturday. A week belongs to the month its Sunday is in, so a month has 4 or 5 weeks.
+  function weeksOf(mk) {
+    const out = [], first = mk + '-01'; let w = C.weekStart(first); if (w < first) w = C.addDays(w, 7);
+    for (; C.monthKey(w) === mk; w = C.addDays(w, 7)) out.push(w);
+    return out;
+  }
+  const monthPlan = (mk) => C.round2((budgetOf().foodWeek || 0) * weeksOf(mk).length);
+  const monthFlex = (mk) => C.round2(sum(weeksOf(mk), (w) => weekSpend(w)));
+  // Subscriptions budget is the total of the subscription bills in Recurring bills.
+  function syncSubs() {
+    const list = (S.bills || []).filter((b) => b.cat === 'subs'); if (!list.length) return false;
+    const tot = C.round2(sum(list, (b) => b.amount)); let ch = false;
+    ['school', 'summer'].forEach((m) => { if (S.budget[m] && S.budget[m].amounts.subs !== tot) { S.budget[m].amounts.subs = tot; ch = true; } });
+    return ch;
+  }
   // The weekly spending money card, used on Home and in Budget > Week.
   function weekHero(ws, isNow) {
     const b = budgetOf(), we = C.addDays(ws, 6), fw = weekLimit(ws), sp = weekSpend(ws), left = C.round2(fw - sp), pct = fw > 0 ? sp / fw : (fw < 0 || sp > 0 ? 1 : 0);
@@ -153,13 +168,27 @@
   }
   // ---------- money left over each month goes to savings ----------
   const LO = () => (S.leftover = S.leftover || { start: C.monthKey(C.today()), before: 0, moved: {} });
-  function monthIncome(mk) { const p = sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount); return p > 0 ? C.round2(p) : incomeOf(S.mode); }
+  // Income for a month: a fixed number you typed wins, then logged paychecks, then your usual income as an estimate.
+  // Which mode (school or summer) a month was in, so old months keep the right usual income.
+  function modeFor(mk) { const l = (S.modeLog || []).filter((x) => x.mk <= mk).sort((a, c) => (a.mk < c.mk ? -1 : 1)); return l.length ? l[l.length - 1].mode : S.mode; }
+  const loggedPay = (mk) => C.round2(sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount));
+  function monthIncome(mk) {
+    const fix = (S.incomeFix || {})[mk]; if (typeof fix === 'number') return fix;
+    const p = loggedPay(mk), est = incomeOf(modeFor(mk));
+    if (mk >= C.monthKey(C.today())) return Math.max(p, est);
+    return p > 0 ? p : est;
+  }
+  function incomeNote(mk) {
+    if (typeof (S.incomeFix || {})[mk] === 'number') return 'You set this month\'s income.';
+    const p = loggedPay(mk), est = incomeOf(modeFor(mk));
+    if (mk >= C.monthKey(C.today())) return p >= est ? '' : p > 0 ? `${fm(p)} logged so far. Counting your usual ${fm(est)} until the rest comes in.` : `No paycheck logged yet. Counting your usual ${fm(est)}.`;
+    return p > 0 ? '' : `No paycheck logged. This is your usual ${fm(est)}, so it is a guess.`;
+  }
   const monthOut = (mk) => C.round2(sum(S.expenses.filter((e) => counted(e) && C.monthKey(e.date) === mk), (e) => e.amount));
   const leftoverOf = (mk) => C.round2(monthIncome(mk) - monthOut(mk));
   // How the weekly money did over a whole month, and whether income covered it.
   function monthOver(mk) {
-    const flex = C.round2(sum(S.expenses.filter((e) => counted(e) && isFlex(e.cat) && C.monthKey(e.date) === mk), (e) => e.amount));
-    const plan = poolMonth(), over = C.round2(Math.max(0, flex - plan)), inc = monthIncome(mk), out = monthOut(mk), lv = C.round2(inc - out);
+    const flex = monthFlex(mk), plan = monthPlan(mk), over = C.round2(Math.max(0, flex - plan)), inc = monthIncome(mk), out = monthOut(mk), lv = C.round2(inc - out);
     return { flex, plan, over, inc, out, lv, short: C.round2(Math.max(0, -lv)) };
   }
   function monthOverNote(mk, done) {
@@ -171,14 +200,23 @@
   function projectedLeftover(mk) {
     const b = budgetOf(), ms = monthSpend(mk);
     const fixedLeft = sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => Math.max(0, (b.amounts[c.id] || 0) - (ms[c.id] || 0)));
-    const flexLeft = Math.max(0, poolMonth() - sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0));
+    // Weekly money still to spend this month: what is left this week (only the days inside this month) plus every later week.
+    let flexLeft = 0; const t = C.today();
+    if (mk === C.monthKey(t)) {
+      const end = mk + '-' + pad(dim(mk)), ws = C.weekStart(t), we = C.addDays(ws, 6), lastDay = we < end ? we : end;
+      flexLeft = Math.max(0, weekLimit(ws) - weekSpend(ws)) * (C.daysBetween(t, lastDay) + 1) / (C.daysBetween(t, we) + 1);
+      if (we < end) flexLeft += (b.foodWeek || 0) / 7 * C.daysBetween(we, end);
+    }
     return C.round2(monthIncome(mk) - monthOut(mk) - fixedLeft - flexLeft);
   }
   function savedThisYear() {
     const lo = LO(), cur = C.monthKey(C.today()), yr = cur.slice(0, 4), months = [];
     for (let mk = lo.start > yr + '-01' ? lo.start : yr + '-01'; mk < cur; mk = C.shiftMonthKey(mk, 1)) months.push({ mk, v: leftoverOf(mk) });
     const before = lo.start.slice(0, 4) === yr ? lo.before || 0 : 0;
-    return { total: C.round2(before + sum(months, (m) => m.v)), months, before };
+    // One time purchases paid from savings take money back out of what you saved.
+    const from = (lo.start > yr + '-01' ? lo.start : yr + '-01') + '-01';
+    const spent = C.round2(sum(S.expenses.filter((e) => e.paidFromSavings && !e.household && e.date >= from && e.date.slice(0, 4) === yr), (e) => e.amount));
+    return { total: C.round2(before + sum(months, (m) => m.v) - spent), months, before, spent };
   }
   function savingsCard() {
     const lo = LO(), cur = C.monthKey(C.today()), y = savedThisYear(), proj = projectedLeftover(cur), last = C.shiftMonthKey(cur, -1);
@@ -186,8 +224,8 @@
     inner += `<div class="row item"><span>${C.monthName(cur)}, on track to save</span><b class="${proj < 0 ? 'r' : 'g'}">${proj < 0 ? fm(proj) + ' short' : fm(proj)}</b></div>`;
     inner += monthOverNote(cur, false);
     inner += `<p class="muted small">If you pay every bill and spend all your weekly money. Every dollar of the ${fm(budgetOf().foodWeek)} a week you skip adds to it.${cur < lo.start ? ' Tracking starts ' + C.monthName(lo.start) + '.' : ''}</p>`;
-    if (y.months.length || y.before) inner += '<p class="label mt">This year</p>' + (y.before ? `<div class="row item"><span>Before tracking</span><b>${fm(y.before)}</b></div>` : '') +
-      y.months.slice().reverse().map((m) => `<div class="row item"><span>${C.monthName(m.mk)}${lo.moved[m.mk] !== undefined ? '<span class="pill g">Moved</span>' : ''}</span><b class="${m.v < 0 ? 'r' : 'g'}">${m.v < 0 ? fm(m.v) + ' short' : fm(m.v)}</b></div>`).join('');
+    if (y.months.length || y.before || y.spent) inner += '<p class="label mt">This year</p>' + (y.before ? `<div class="row item"><span>Before tracking</span><b>${fm(y.before)}</b></div>` : '') + (y.spent ? `<div class="row item"><span>Spent from savings</span><b class="${y.spent > 0 ? 'r' : 'g'}">${y.spent > 0 ? 'minus ' : 'plus '}${fm(y.spent)}</b></div>` : '') +
+      y.months.slice().reverse().map((m) => `<div class="row item"><span>${C.monthName(m.mk)}${lo.moved[m.mk] !== undefined ? '<span class="pill g">Moved</span>' : ''}${incomeNote(m.mk) && !/set this/.test(incomeNote(m.mk)) ? '<span class="pill y">Estimate</span>' : ''}</span><b class="${m.v < 0 ? 'r' : 'g'}">${m.v < 0 ? fm(m.v) + ' short' : fm(m.v)}</b></div>`).join('');
     const lv = leftoverOf(last);
     if (last >= lo.start && lo.moved[last] === undefined && lv > 0) inner += `<div class="card inset"><p class="med">${C.monthName(last)} left you ${fm(lv)}</p><p class="muted small">Move it from checking to savings, then tap below.</p><button class="mt8 btn primary" data-act="moveLeftover" data-mk="${last}">I moved it to savings</button></div>`;
     inner += `<p class="muted small mt8">Bonus this month: ${fm(bonusInMonth(cur))}. Bonus money goes straight to a goal.</p><button class="mt8 btn" data-act="logBonus">Log bonus</button>`;
@@ -197,16 +235,16 @@
   function weekBreakdown(ws) {
     const we = C.addDays(ws, 6), by = {};
     S.expenses.forEach((e) => { if (counted(e) && isFlex(e.cat) && e.date >= ws && e.date <= we) by[e.cat] = (by[e.cat] || 0) + e.amount; });
-    const keys = Object.keys(by).sort((a, c) => by[c] - by[a]); if (!keys.length) return '';
+    const keys = Object.keys(by).filter((k) => by[k] > 0.004).sort((a, c) => by[c] - by[a]); if (!keys.length) return '';
     const tot = sum(keys, (k) => by[k]);
     return '<p class="label mt">Where it went</p>' + keys.map((k) => `<div class="rline"><div class="row"><span>${esc(catName(k))}</span><b>${fm(by[k])} <span class="muted small">${Math.round(by[k] / tot * 100)}%</span></b></div>${bar(by[k] / tot, 'b')}</div>`).join('');
   }
   function gasCard() {
     const gas = S.cats.find((c) => c.id === 'gas'); if (!gas) return '';
     const t = C.today(), mk = C.monthKey(t), lim = budgetOf().amounts.gas || 0;
-    const fills = S.expenses.filter((e) => counted(e) && e.cat === 'gas' && C.monthKey(e.date) === mk).sort((a, c) => (a.date < c.date ? 1 : -1));
+    let fills = S.expenses.filter((e) => counted(e) && e.cat === 'gas' && C.monthKey(e.date) === mk).sort((a, c) => (a.date < c.date ? 1 : -1));
     if (!lim && !fills.length) return '';
-    const sp = C.round2(sum(fills, (e) => e.amount)), day = +t.slice(8), days = dim(mk), pace = C.round2(sp / day * days);
+    const sp = C.round2(sum(fills, (e) => e.amount)); fills = fills.filter((e) => e.amount > 0); const day = +t.slice(8), days = dim(mk), pace = C.round2(sp / day * days);
     const pct = lim ? sp / lim : 0, cls = C.status(pct);
     let inner = `<p class="big ${sp > lim && lim ? 'r' : ''}">${fm(sp)} <span class="muted med">of ${fm(lim)}</span></p>${lim ? bar(pct, cls) : ''}`;
     if (fills.length) {
@@ -242,7 +280,8 @@
     if (k === 'ins') {
       const st = g.start || '0000-00-00';
       t = sum(g.contribs.filter((c) => c.date >= st), (c) => c.amount) +
-        sum(S.expenses.filter((e) => e.cat === 'insurance' && counted(e) && e.date >= st), (e) => e.amount);
+        sum(S.expenses.filter((e) => e.cat === 'insurance' && counted(e) && e.date >= st), (e) => e.amount) -
+        sum(S.expenses.filter((e) => e.fromFund && e.date >= st), (e) => e.amount);
     } else t = sum(g.contribs, (c) => c.amount);
     if (k === 'mom') t += sum(S.expenses.filter((e) => e.cat === 'mompay' && counted(e)), (e) => e.amount);
     if (k === 'gen') t -= sum(S.expenses.filter((e) => e.paidFromSavings), (e) => e.amount);
@@ -270,7 +309,7 @@
   }
   function takeoutStreak() {
     const t = C.today();
-    const list = S.expenses.filter((e) => !e.household && (e.takeout || e.cat === 'food')).map((e) => e.date).sort();
+    const list = S.expenses.filter((e) => !e.household && e.amount > 0 && (e.takeout || e.cat === 'food')).map((e) => e.date).sort();
     if (list.length) return { days: Math.max(0, C.daysBetween(list[list.length - 1], t)), has: true };
     const all = S.expenses.map((e) => e.date).sort();
     return { days: all.length ? C.daysBetween(all[0], t) : 0, has: false };
@@ -283,7 +322,7 @@
 
   // Balances follow purchases logged on or after the day automatic balances started.
   function applyBal(e) {
-    if (!S.autoBal || e.bal || !S.balSince || e.date < S.balSince) return;
+    if (!S.autoBal || e.bal || e.noBal || !S.balSince || e.date < S.balSince) return;
     const a = S.accounts.find((x) => x.id === e.account); if (!a) return;
     const d = a.type === 'card' ? e.amount : -e.amount;
     a.balance = C.round2((a.balance || 0) + d); e.bal = { id: a.id, d };
@@ -351,6 +390,7 @@
   // ---------- render ----------
   function render() {
     if (!S) return;
+    if (syncSubs()) save();
     const y = window.scrollY;
     let body;
     switch (ui.tab) {
@@ -442,26 +482,28 @@
   function MonthView() {
     const mk = ui.mk || C.monthKey(C.today()), b = budgetOf(), ms = monthSpend(mk);
     let h = monthNav(mk, 'mnav');
-    const flexSp = sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0), pm = poolMonth();
-    const parts = S.cats.filter((c) => c.kind === 'flex' && ms[c.id]).map((c) => esc(c.name) + ' ' + fm(ms[c.id])).join(', ');
+    const wk = weeksOf(mk), flexSp = monthFlex(mk), pm = monthPlan(mk);
+    const parts = S.cats.filter((c) => c.kind === 'flex').map((c) => ({ c, v: C.round2(sum(wk, (w) => weekSpend(w, c.id))) })).filter((x) => Math.abs(x.v) > 0.004).map((x) => esc(x.c.name) + ' ' + fm(x.v) + (x.v < 0 ? ' back' : '')).join(', ');
     const pp = pm ? flexSp / pm : (flexSp ? 2 : 0), pc = C.status(pp);
-    const poolRow = `<div class="item"><div class="row"><span class="t">Spending money</span><span class="${pc}">${fm(flexSp)} of ${fm(pm)}</span></div>${bar(pp, pc)}<div class="muted small">${flexSp > pm ? fm(flexSp - pm) + ' over' : fm(pm - flexSp) + ' left'}${parts ? '. ' + parts : ''}</div></div>`;
+    const poolRow = `<div class="item"><div class="row"><span class="t">Spending money</span><span class="${pc}">${fm(flexSp)} of ${fm(pm)}</span></div>${bar(pp, pc)}<div class="muted small">${wk.length} weeks at ${fm(b.foodWeek || 0)}. ${flexSp > pm ? fm(flexSp - pm) + ' over' : fm(pm - flexSp) + ' left'}${parts ? '. ' + parts : ''}</div></div>`;
     const rows = poolRow + S.cats.filter((c) => c.kind === 'fixed' && ((b.amounts[c.id] || 0) > 0 || (ms[c.id] || 0) > 0)).map((c) => {
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
     h += card('Spent vs budget', rows);
     { const o = monthOver(mk), done = mk < C.monthKey(C.today());
-      h += card('Month result', `<div class="row item"><span>Income</span><b>${fm(o.inc)}</b></div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
+      const inote = incomeNote(mk);
+      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<button class="btn small mt8" data-act="fixIncome" data-mk="${mk}">Set this month's income</button><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
     const fs = sum(S.expenses.filter((e) => e.paidFromSavings && C.monthKey(e.date) === mk), (e) => e.amount);
     const fo = sum(S.expenses.filter((e) => e.forOther && C.monthKey(e.date) === mk), (e) => e.amount);
     const hh = sum(S.expenses.filter((e) => e.household && C.monthKey(e.date) === mk), (e) => e.amount);
-    if (fs || fo || hh) h += card('Not counted', `${hh ? `<div class="row"><span>Household, ignored</span><b>${fm(hh)}</b></div>` : ''}${fs ? `<div class="row"><span>Paid from savings</span><b>${fm(fs)}</b></div>` : ''}${fo ? `<div class="row"><span>Bought for others</span><b>${fm(fo)}</b></div>` : ''}`);
+    const fu = sum(S.expenses.filter((e) => e.fromFund && C.monthKey(e.date) === mk), (e) => e.amount);
+    if (fs || fo || hh || fu) h += card('Not counted', `${fu ? `<div class="row"><span>Insurance bill, paid from the fund</span><b>${fm(fu)}</b></div>` : ''}${hh ? `<div class="row"><span>Household, ignored</span><b>${fm(hh)}</b></div>` : ''}${fs ? `<div class="row"><span>Paid from savings</span><b>${fm(fs)}</b></div>` : ''}${fo ? `<div class="row"><span>Bought for others</span><b>${fm(fo)}</b></div>` : ''}`);
     return h;
   }
   function expRow(e) {
-    const tags = (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
-    return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span><b>${fm(e.amount)}</b></div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
+    const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
+    return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span>${e.amount < 0 ? `<b class="g">${fm(e.amount)} back</b>` : `<b>${fm(e.amount)}</b>`}</div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
   }
   function histMatches() {
     const q = (ui.hq || '').trim().toLowerCase(), cat = ui.hcat || '', rng = ui.hrng || 'all', t = C.today();
@@ -469,7 +511,7 @@
     const isAmt = /^\$?\d+(\.\d{1,2})?$/.test(q), qn = C.num(q);
     return S.expenses.filter((e) => (!cat || e.cat === cat) && (!since || e.date >= since) && (!q ||
       (e.note || '').toLowerCase().includes(q) || catName(e.cat).toLowerCase().includes(q) || (e.forOther || '').toLowerCase().includes(q) ||
-      (isAmt && Math.abs(e.amount - qn) < 0.005))).sort((a, c) => (a.date < c.date ? 1 : a.date > c.date ? -1 : 0));
+      (isAmt && Math.abs(Math.abs(e.amount) - qn) < 0.005))).sort((a, c) => (a.date < c.date ? 1 : a.date > c.date ? -1 : 0));
   }
   function histListHTML() {
     const list = histMatches(), filtered = ui.hq || ui.hcat || (ui.hrng && ui.hrng !== 'all');
@@ -497,12 +539,12 @@
       const items = open.filter((i) => i.dir === dir).sort((a, c) => (a.date < c.date ? -1 : 1));
       return card(title, items.length ? items.map((i) => {
         const age = C.daysBetween(i.date, t), late = age > 14;
-        return `<div class="item"><div class="row"><span class="t ${late ? 'r' : ''}">${esc(i.person)}</span><b class="${late ? 'r' : ''}">${fm(remaining(i))}</b></div><div class="muted small">${esc(i.reason || 'No reason')}, ${C.shortDate(i.date)}${late ? `<span class="pill r">${age} days unpaid</span>` : ''}${i.payments.length ? `<span class="pill g">Paid ${fm(sum(i.payments, (p) => p.amount))} of ${fm(i.amount)}</span>` : ''}</div><div class="btns"><button class="btn small" data-act="payIou" data-id="${i.id}">Payment</button><button class="btn small" data-act="settleIou" data-id="${i.id}">Settle</button><button class="btn small danger" data-act="delIou" data-id="${i.id}">Delete</button></div></div>`;
+        return `<div class="item"><div class="row"><span class="t ${late ? 'r' : ''}">${esc(i.person)}</span><b class="${late ? 'r' : ''}">${fm(remaining(i))}</b></div><div class="muted small">${esc(i.reason || 'No reason')}, ${C.shortDate(i.date)}${late ? `<span class="pill r">${age} days unpaid</span>` : ''}${i.payments.length ? `<span class="pill g">Paid ${fm(sum(i.payments, (p) => p.amount))} of ${fm(i.amount)}</span>` : ''}</div><div class="btns"><button class="btn small" data-act="payIou" data-id="${i.id}">Payment</button><button class="btn small" data-act="settleIou" data-id="${i.id}">Settle</button>${i.dir === 'owedToMe' ? `<button class="btn small" data-act="forgiveSheet" data-id="${i.id}">Forgive</button>` : ''}<button class="btn small danger" data-act="delIou" data-id="${i.id}">Delete</button></div></div>`;
       }).join('') : '<p class="muted">Nothing here.</p>');
     };
     h += list('owedToMe', 'They owe me') + list('iOwe', 'I owe them');
     const done = S.ious.filter((i) => i.settled).slice(-5).reverse();
-    if (done.length) h += card('Recently settled', done.map((i) => `<div class="row item"><span>${esc(i.person)}, ${esc(i.reason || '')}</span><span class="muted">${fm(i.amount)}</span></div>`).join(''));
+    if (done.length) h += card('Recently settled', done.map((i) => `<div class="row item"><span>${esc(i.person)}, ${esc(i.reason || '')}${i.forgiven ? '<span class="pill y">Forgiven</span>' : ''}</span><span class="muted">${fm(i.amount)}</span></div>`).join(''));
     return h;
   }
 
@@ -522,7 +564,7 @@
       if (dd < 0) insLine = `<p class="r">Due date was ${C.shortDate(ins.due)}.</p>`;
       else { const months = Math.max(1, dd / 30.44); insLine = `<p class="muted">Due ${C.shortDate(ins.due)}, ${dd} days away. ${need > 0 ? 'Needs about ' + fm(need / months) + ' a month.' : 'Fully funded.'}</p>`; }
     }
-    h += goalCard('ins', `<p class="big">${fm(insTot)} <span class="muted med">of ${fm(ins.target)}</span></p>${bar(ins.target ? insTot / ins.target : 0, C.status(0.5))}${insLine}<p class="muted small">Car insurance spending counts toward this.</p>${ins.due ? '<button class="mt8 btn" data-act="insNext">Bill paid, start next cycle</button>' : ''}`);
+    h += goalCard('ins', `<p class="big">${fm(insTot)} <span class="muted med">of ${fm(ins.target)}</span></p>${bar(ins.target ? insTot / ins.target : 0, C.status(0.5))}${insLine}<p class="muted small">Car insurance spending counts toward this.</p><button class="mt8 btn" data-act="insPaySheet">I paid the insurance bill</button>`);
     // trip
     const trip = S.goals.trip, tripTot = goalTotal('trip');
     h += goalCard('trip', trip.target ? `<p class="big">${fm(tripTot)} <span class="muted med">of ${fm(trip.target)}</span></p>${bar(tripTot / trip.target, 'b')}` : `<p class="big">${fm(tripTot)}</p><p class="muted">Set a target in Edit if you want a progress bar.</p>`);
@@ -640,6 +682,7 @@
     h += card('Spending types', '<p class="muted small">The kinds of things your weekly money goes to. Rename them or add your own.</p>' + S.cats.map((c, i) => c.kind !== 'flex' ? '' : `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" value="${esc(c.name)}">${c.id === 'other' ? '' : `<button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button>`}</div>`).join('') + '<button class="mt btn" data-act="addType">Add a type</button>');
     h += card('Monthly bills and fixed costs', S.cats.map((c, i) => c.kind !== 'fixed' ? '' : c.custom
       ? `<div class="g8 row mt8"><input type="text" data-path="cats.${i}.name" data-t="s" data-re="1" value="${esc(c.name)}" aria-label="Name"><button class="btn small danger" data-act="delType" data-id="${c.id}">Remove</button></div><input type="text" class="mt8" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}" aria-label="${esc(c.name)} amount">`
+      : c.id === 'subs' && S.bills.some((x) => x.cat === 'subs') ? `<label class="f">${esc(c.name)}</label><div class="row item"><b>${fm(b.amounts.subs || 0)}</b><button class="btn small" data-act="openMore" data-v="bills">Edit list</button></div><p class="muted small">The total of your subscriptions in Recurring bills. Add or change one there.</p>`
       : `<label class="f">${esc(c.name)}</label><input type="text" inputmode="decimal" data-path="budget.${m}.amounts.${c.id}" data-t="n" data-re="1" value="${b.amounts[c.id] || 0}">`).join('') +
       '<button class="mt btn" data-act="addFixed">Add a bill</button><p class="muted small mt8">For anything you pay every month, like Amazon Prime. It counts toward your monthly bills, not your weekly money.</p>');
     h += card('Rollover', `<label class="check"><input type="checkbox" data-act="toggleRoll" ${S.rollover ? 'checked' : ''}>Roll unspent spending money into next week</label><p class="muted small">Up to one extra week's worth can carry over.</p><label class="check mt8"><input type="checkbox" data-act="toggleOver" ${S.overCarry ? 'checked' : ''}>Take overspending out of next week</label><p class="muted small">${S.overCarry ? 'If you go over, next week starts with that much less. A big overspend keeps carrying until it is paid back.' : 'Going over does not carry, so a bad week never eats into the next one.'}</p>${S.overCarry ? `<label class="check mt8"><input type="checkbox" data-act="toggleSettle" ${S.overSettle !== false ? 'checked' : ''}>Pay it off from month end savings</label><p class="muted small">When a new month starts, overspending you still owe comes out of last month's savings instead of your weeks. Only what savings cannot cover keeps carrying.</p>` : ''}`);
@@ -662,7 +705,7 @@
     let out = '';
     if (isFlex(cat)) {
       const l = weekLimit(ws) - weekSpend(ws); out += line('This week, spending money', l, l - price);
-      const flexM = sum(S.cats.filter((c) => c.kind === 'flex'), (c) => ms[c.id] || 0), pl = poolMonth() - flexM;
+      const pl = monthPlan(mk) - monthFlex(mk);
       out += line('This month, spending money', pl, pl - price);
       const tl0 = plannedSpend() - sum(Object.values(ms));
       out += line('This month, whole budget', tl0, tl0 - price);
@@ -688,7 +731,7 @@
     const diff = r.tot - r.prevTot, pct = r.prevTot ? Math.round(Math.abs(diff) / r.prevTot * 100) : 0;
     const cmp = !r.prevTot ? `Nothing was logged the ${unit} before.` : Math.abs(diff) < 0.005 ? `Same as last ${unit}.` : `${fm(diff)} ${diff > 0 ? 'more' : 'less'} than last ${unit} (${pct}%).`;
     h += card('Total spent', `<p class="big">${fm(r.tot)}${r.plan ? ` <span class="muted med">of ${fm(r.plan)}</span>` : ''}</p>${r.plan ? bar(r.tot / r.plan, C.status(r.tot / r.plan)) : ''}<p class="${diff > 0 && r.prevTot ? 'r' : diff < 0 ? 'g' : 'muted'}">${cmp}</p>` +
-      `<div class="row item"><span>Purchases</span><b>${r.list.length}</b></div><div class="row item"><span>Average per day</span><b>${fm(r.tot / r.days)}</b></div>` +
+      `<div class="row item"><span>Purchases</span><b>${r.list.filter((e) => e.amount > 0).length}</b></div>${r.refunds ? `<div class="row item"><span>Refunds</span><b class="g">${fm(r.refunds)} back</b></div>` : ''}<div class="row item"><span>Average per day</span><b>${fm(r.tot / r.days)}</b></div>` +
       (r.big ? `<div class="row item"><span>Biggest: ${esc(r.big.note || catName(r.big.cat))}</span><b>${fm(r.big.amount)}</b></div>` : ''));
 
     h += trend;
@@ -711,7 +754,7 @@
     const accts = Object.keys(r.byAcct);
     if (accts.length > 1 || (accts.length && S.accounts.length > 1)) h += card('By account', accts.map((k) => `<div class="row item"><span>${esc(k)}</span><b>${fm(r.byAcct[k])}</b></div>`).join(''));
 
-    const ex = [['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
+    const ex = [['Insurance bill, paid from the fund', r.fund], ['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
     if (ex.length) h += card('Not counted in your budget', ex.map((x) => `<div class="row item"><span>${x[0]}</span><b>${fm(x[1])}</b></div>`).join(''));
 
     const sv = [['Paychecks', r.paid], ['Saved toward goals', r.saved], ['IOU payments back to you', r.iouIn]].filter((x) => x[1] > 0);
@@ -761,10 +804,11 @@
     return {
       per, from, to, title, all, list, tot, prevTot, byCat, byAcct, buckets, days, saved, iouIn, paid,
       future: to >= t,
-      plan: per === 'week' ? 0 : plannedSpend(),
+      plan: per === 'week' ? 0 : C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => budgetOf().amounts[c.id] || 0) + monthPlan(C.monthKey(from))),
+      refunds: C.round2(-sum(list.filter((e) => e.amount < 0), (e) => e.amount)),
       big: list.slice().sort((a, c) => c.amount - a.amount)[0],
       top: Object.values(groups).sort((a, c) => c.v - a.v).slice(0, 5),
-      fromSav: s((e) => e.paidFromSavings && !e.household), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
+      fromSav: s((e) => e.paidFromSavings && !e.household), fund: s((e) => e.fromFund), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
     };
   }
   function trendHTML(r) {
@@ -930,17 +974,20 @@
     }
     // review
     const n = im.items.filter((x) => x.on).length;
-    h += card('Review', `<p class="muted">${im.items.length} found${im.skipped ? ', ' + im.skipped + ' credits skipped' : ''}. Fix amounts and categories, then save.</p><label class="f">Account</label><select id="impacct">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === S.lastAccount ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}</select>` +
-      im.items.map((x, i) => `<div class="rev"><label class="check"><input type="checkbox" data-ri="${i}" data-f="on" ${x.on ? 'checked' : ''}><span class="t">${C.shortDate(x.date)}</span>${x.dup ? '<span class="pill y">Possible duplicate</span>' : ''}</label><input type="text" data-ri="${i}" data-f="desc" value="${esc(x.desc)}"><div class="two"><input type="text" inputmode="decimal" data-ri="${i}" data-f="amount" value="${x.amount.toFixed(2)}"><select data-ri="${i}" data-f="cat">${catOpts(x.cat)}</select></div></div>`).join(''));
+    h += card('Review', `<p class="muted">${im.items.length} found${im.skipped ? ', including ' + im.skipped + ' with money coming in. Those are unchecked. Only check the ones that are refunds or returns' : ''}. Fix amounts and categories, then save.</p><label class="f">Account</label><select id="impacct">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === S.lastAccount ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}</select>` +
+      im.items.map((x, i) => `<div class="rev"><label class="check"><input type="checkbox" data-ri="${i}" data-f="on" ${x.on ? 'checked' : ''}><span class="t">${C.shortDate(x.date)}</span>${x.refund ? '<span class="pill g">Money in</span>' : ''}${x.dup ? '<span class="pill y">Possible duplicate</span>' : ''}</label><input type="text" data-ri="${i}" data-f="desc" value="${esc(x.desc)}"><div class="two"><input type="text" inputmode="decimal" data-ri="${i}" data-f="amount" value="${x.amount.toFixed(2)}"><select data-ri="${i}" data-f="cat">${catOpts(x.cat)}</select></div></div>`).join(''));
     h += `<div class="btns"><button class="btn" data-act="impCancel">Cancel</button><button class="btn primary" data-act="impSave">Save ${n}</button></div>`;
     return h;
   }
 
+  // Possible duplicate: same amount logged within 3 days (banks post a few days late), or a bill you checked off the same month.
   function buildItems(rows) {
-    const keys = new Set(S.expenses.map((e) => C.dupKey(e.date, e.amount)));
+    const keys = new Set();
     return rows.map((r) => {
-      const k = C.dupKey(r.date, r.amount), dup = keys.has(k); keys.add(k);
-      return Object.assign({}, r, { dup, on: !dup });
+      const amt = r.refund ? -r.amount : r.amount, k = C.dupKey(r.date, amt), c = C.cents(amt);
+      const near = S.expenses.some((e) => C.cents(e.amount) === c && (e.source === 'bill' ? C.monthKey(e.date) === C.monthKey(r.date) : Math.abs(C.daysBetween(e.date, r.date)) <= 3));
+      const dup = near || keys.has(k); keys.add(k);
+      return Object.assign({}, r, { dup, on: !dup && !r.refund });
     });
   }
 
@@ -959,10 +1006,12 @@
     const im = ui.imp, m = im.map || S.csvMap; let skipped = 0; const out = [];
     im.rows.slice(1).forEach((r) => {
       const amt = C.parseAmount(r[m.amount]); if (isNaN(amt)) return;
+      if (!amt) return;
       const spending = m.sign === 'neg' ? amt < 0 : amt > 0;
-      if (!spending) { skipped++; return; }
       const raw = String(r[m.desc] || ''), desc = C.cleanMerchant(raw) || raw.trim();
-      out.push({ date: C.parseDate(r[m.date]), desc, amount: Math.abs(amt), cat: C.categorize(raw, S.rules) });
+      // Money coming in is listed unchecked. Most of it is paychecks or card payments, so only refunds should be checked.
+      if (!spending) skipped++;
+      out.push({ date: C.parseDate(r[m.date]), desc, amount: Math.abs(amt), cat: C.categorize(raw, S.rules), refund: !spending });
     });
     im.items = buildItems(out); im.skipped = skipped; im.step = 'review';
   }
@@ -1099,8 +1148,9 @@
     const e = id ? S.expenses.find((x) => x.id === id) : null;
     const cat = e ? e.cat : preCat || (isFlex(ui.lastCat) ? ui.lastCat : 'food'), acct = e ? e.account : S.lastAccount;
     ui.rcpt = null; ui.rcptDel = false; ui.rcptFor = e ? e.id : null;
-    openSheet(`<h2>${e ? 'Edit expense' : 'Add expense'}</h2><form data-form="expense"><input type="hidden" name="id" value="${id || ''}">
-      <input class="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${e ? e.amount.toFixed(2) : ''}" required>
+    openSheet(`<h2>${e ? (e.amount < 0 ? 'Edit refund' : 'Edit expense') : 'Add expense'}</h2><form data-form="expense"><input type="hidden" name="id" value="${id || ''}">
+      <input class="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" value="${e ? Math.abs(e.amount).toFixed(2) : ''}" required>
+      <label class="check"><input type="checkbox" name="refund" ${e && e.amount < 0 ? 'checked' : ''}>Refund or return, money came back</label>
       <label class="f">Spending money</label><div class="chips">${S.cats.filter((c) => c.kind === 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Bills and gas</label><div class="chips">${S.cats.filter((c) => c.kind !== 'flex').map((c) => `<input type="radio" id="c_${c.id}" name="cat" value="${c.id}" ${c.id === cat ? 'checked' : ''}><label for="c_${c.id}">${esc(c.name)}</label>`).join('')}</div>
       <label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional" value="${esc(e ? e.note : '')}">
@@ -1111,6 +1161,7 @@
       <div id="personbox" ${e && e.forOther ? '' : 'hidden'}><input type="text" name="person" placeholder="Who owes you?" autocomplete="off" value="${esc(e ? e.forOther : '')}"></div>
       <label class="check"><input type="checkbox" name="oneTime" ${e && e.paidFromSavings ? 'checked' : ''}>One time, paid from savings</label>
       <label class="check"><input type="checkbox" name="household" ${e && e.household ? 'checked' : ''}>Household charge, ignore it</label>
+      ${e && e.cat === 'insurance' && e.amount > 0 ? `<label class="check"><input type="checkbox" name="fromFund" ${e.fromFund ? 'checked' : ''}>The real insurance bill, paid from the insurance fund</label>` : ''}
       <div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>
       ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
     const a = $('#sheet input[name=amount]'); if (a && !e) setTimeout(() => a.focus(), 50);
@@ -1119,6 +1170,29 @@
 
   // ---------- forms ----------
   const forms = {
+    incomeFix(fd) {
+      const mk = fd.get('mk'), raw = String(fd.get('amount') || '').trim();
+      S.incomeFix = S.incomeFix || {};
+      if (!raw) delete S.incomeFix[mk];
+      else { const v = C.round2(C.num(raw)); if (!(v >= 0)) { toast('Enter an amount'); return; } S.incomeFix[mk] = v; }
+      save(); closeSheet(); render(); toast(raw ? 'Income set' : 'Back to automatic');
+    },
+    insPay(fd) {
+      const amount = C.round2(C.num(fd.get('amount'))), date = fd.get('date') || C.today(), g = S.goals.ins;
+      if (!(amount > 0)) { toast('Enter the amount'); return; }
+      const e = { id: uid(), amount, cat: 'insurance', note: 'Car insurance bill', account: fd.get('account'), date, paidFromSavings: false, household: false, fromFund: true, forOther: '', takeout: false, source: 'manual' };
+      S.expenses.push(e); applyBal(e);
+      if (g.due && fd.get('next')) g.due = C.addMonths(g.due, 6);
+      save(); closeSheet(); render(); toast('Paid from the insurance fund');
+    },
+    forgive(fd) {
+      const i = S.ious.find((x) => x.id === fd.get('id')); if (!i) return;
+      const r = remaining(i); if (!(r > 0)) { closeSheet(); return; }
+      const sav = fd.get('from') === 'savings';
+      S.expenses.push({ id: uid(), amount: r, cat: 'other', note: 'Forgave ' + i.person + (i.reason ? ', ' + i.reason : ''), account: 'cash', date: C.today(), paidFromSavings: sav, household: false, forOther: '', takeout: false, source: 'manual', noBal: true, iouForgive: i.id });
+      i.forgiven = r; i.settled = true;
+      save(); closeSheet(); render(); toast(sav ? fm(r) + ' taken from savings' : fm(r) + ' added to this week');
+    },
     cover(fd) {
       const amount = C.round2(C.num(fd.get('amount')));
       if (!(amount > 0)) { toast('Enter an amount'); return; }
@@ -1128,11 +1202,13 @@
     expense(fd) {
       const amount = C.round2(C.num(fd.get('amount')));
       if (!(amount > 0)) { toast('Enter an amount'); return; }
-      const id = fd.get('id'), cat = fd.get('cat') || 'other';
-      const forOther = !!fd.get('forOther'), person = (fd.get('person') || '').trim();
+      const id = fd.get('id'), cat = fd.get('cat') || 'other', refund = !!fd.get('refund');
+      const forOther = !refund && !!fd.get('forOther'), person = (fd.get('person') || '').trim();
       if (forOther && !person) { toast('Who was it for?'); return; }
-      const rec = { amount, cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: cat === 'food' && !fd.get('household') };
-      let exp = id ? S.expenses.find((x) => x.id === id) : null, msg = 'Saved';
+      const old = id ? S.expenses.find((x) => x.id === id) : null;
+      if (old && old.iouForgive && refund) { toast('A forgiven IOU cannot be a refund'); return; }
+      const rec = { amount: refund ? -amount : amount, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
+      let exp = old, msg = refund ? 'Refund saved' : 'Saved';
       if (exp) { revertBal(exp); Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
       applyBal(exp);
       if (ui.rcpt) { const id2 = exp.id, data = ui.rcpt; exp.receipt = true; V.putFile(id2, data).catch(() => toast('Could not save the photo')); }
@@ -1157,7 +1233,9 @@
       const i = S.ious.find((x) => x.id === fd.get('id')); if (!i) return;
       const amt = C.round2(C.num(fd.get('amount')));
       if (!(amt > 0)) { toast('Enter an amount'); return; }
-      i.payments.push({ date: fd.get('date') || C.today(), amount: Math.min(amt, remaining(i)) });
+      const paid = C.round2(Math.min(amt, remaining(i))), pdate = fd.get('date') || C.today();
+      i.payments.push({ date: pdate, amount: paid });
+      if (i.dir === 'iOwe' && fd.get('spend') && paid > 0) { const e = { id: uid(), amount: paid, cat: 'other', note: 'Paid back ' + i.person + (i.reason ? ', ' + i.reason : ''), account: fd.get('account') || S.lastAccount, date: pdate, paidFromSavings: false, household: false, forOther: '', takeout: false, source: 'manual', iouPay: i.id }; S.expenses.push(e); applyBal(e); }
       if (remaining(i) <= 0.004) i.settled = true;
       save(); closeSheet(); render(); toast(i.settled ? 'Settled' : 'Payment logged');
     },
@@ -1177,7 +1255,7 @@
     goaledit(fd) {
       const g = S.goals[fd.get('k')];
       g.target = Math.max(0, C.num(fd.get('target')));
-      if (fd.get('k') === 'ins') { const d = fd.get('due'); g.due = d || ''; if (d) g.start = C.addMonths(d, -6); }
+      if (fd.get('k') === 'ins') { const d = fd.get('due'); g.due = d || ''; if (d && !g.start) g.start = C.addMonths(d, -6); }
       save(); closeSheet(); render();
     },
     bill(fd) {
@@ -1289,7 +1367,14 @@
   // ---------- actions ----------
   const actions = {
     tab(d) { ui.tab = d.t; ui.more = null; render(); window.scrollTo(0, 0); },
-    mode(d) { S.mode = d.m; save(); render(); },
+    mode(d) {
+      if (d.m !== S.mode) {
+        const mk = C.monthKey(C.today());
+        S.modeLog = S.modeLog || [{ mk: '0000-00', mode: S.mode }];
+        S.modeLog = S.modeLog.filter((x) => x.mk !== mk); S.modeLog.push({ mk, mode: d.m });
+      }
+      S.mode = d.m; save(); render();
+    },
     settings() { ui.tab = 'more'; ui.more = 'security'; render(); fillFaceBox(); window.scrollTo(0, 0); },
     add() { addSheet(); },
     logGas() { addSheet(null, 'gas'); },
@@ -1313,6 +1398,7 @@
     addType() { S.cats.splice(S.cats.findIndex((c) => c.id === 'other'), 0, { id: uid(), name: 'New type', kind: 'flex' }); save(); render(); },
     delType(d) {
       const n = S.expenses.filter((e) => e.cat === d.id).length, c = S.cats.find((x) => x.id === d.id); if (!c) return;
+      if (c.kind === 'fixed' && (n || S.bills.some((b) => b.cat === c.id))) { toast(c.name + ' has payments or bills, so set it to 0 instead'); return; }
       if (!confirm(n ? 'Remove ' + c.name + '? Its ' + n + ' purchase' + (n === 1 ? '' : 's') + ' will move to Other.' : 'Remove ' + c.name + '?')) return;
       S.expenses.forEach((e) => { if (e.cat === d.id) e.cat = 'other'; });
       S.rules.forEach((r) => { if (r.cat === d.id) r.cat = 'other'; });
@@ -1326,7 +1412,8 @@
       revertBal(e); if (e.receipt) V.delFile(e.id);
       S.expenses = S.expenses.filter((x) => x !== e);
       S.ious = S.ious.filter((i) => !(i.expenseId === e.id && !i.payments.length));
-      save(); closeSheet(); render(); toast('Deleted');
+      if (e.iouForgive) { const i = S.ious.find((x) => x.id === e.iouForgive); if (i) { i.settled = false; delete i.forgiven; } }
+      save(); closeSheet(); render(); toast(e.iouForgive ? 'Deleted. The IOU is open again.' : 'Deleted');
     },
     closeSheet() { closeSheet(); },
     sheetBg(d, el, ev) { if (ev.target === el) closeSheet(); },
@@ -1429,6 +1516,18 @@
       openSheet(`<h2>Cover with savings</h2><p class="muted">Use savings instead of making the next weeks pay it back. This week's spending money goes up by this amount.</p><form data-form="cover"><input type="hidden" name="ws" value="${ws}"><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${need.toFixed(2)}"><p class="muted small">It comes out of what you save this month, so your savings goes down by the same amount.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Cover it</button></div></form>${cv ? `<p class="muted small mt">Already covered this week: ${fm(cv)}.</p><button class="mt btn small danger" data-act="uncover" data-ws="${ws}">Undo cover</button>` : ''}`);
     },
     uncover(d) { S.covers = (S.covers || []).filter((c) => c.ws !== d.ws); save(); closeSheet(); render(); toast('Cover removed'); },
+    fixIncome(d) {
+      const mk = d.mk, fix = (S.incomeFix || {})[mk], p = loggedPay(mk);
+      openSheet(`<h2>Income for ${C.monthName(mk)}</h2><p class="muted">${p ? 'Paychecks logged: ' + fm(p) + '.' : 'No paychecks logged.'} Type what you really got this month, even 0. Leave it empty to go back to automatic.</p><form data-form="incomeFix"><input type="hidden" name="mk" value="${mk}"><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" value="${typeof fix === 'number' ? fix.toFixed(2) : ''}" placeholder="Automatic"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+    },
+    insPaySheet() {
+      const g = S.goals.ins, tot = goalTotal('ins'), amt = g.target || tot;
+      openSheet(`<h2>Pay the insurance bill</h2><p class="muted">This comes out of the insurance fund, not your budget, so it is not counted as spending twice. The fund has ${fm(tot)}.</p><form data-form="insPay"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" value="${amt > 0 ? amt.toFixed(2) : ''}" required><label class="f">Paid with</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === S.lastAccount ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash">Cash or other</option></select><label class="f">Date</label><input type="date" name="date" value="${C.today()}">${g.due ? `<label class="mt check"><input type="checkbox" name="next" checked>Move the due date to ${C.shortDate(C.addMonths(g.due, 6))}</label>` : ''}<div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+    },
+    forgiveSheet(d) {
+      const i = S.ious.find((x) => x.id === d.id); if (!i) return; const r = remaining(i);
+      openSheet(`<h2>Forgive ${esc(i.person)}</h2><p class="muted">They will not pay back the ${fm(r)}, so it becomes your own spending. Where should it come from?</p><form data-form="forgive"><input type="hidden" name="id" value="${i.id}"><div class="col"><button class="btn primary" type="submit" name="from" value="week">This week's spending money</button><button class="btn" type="submit" name="from" value="savings">My savings</button><button class="btn" type="button" data-act="closeSheet">Cancel</button></div></form>`);
+    },
     toggleSettle(d, el) { S.overSettle = el.checked; save(); render(); },
     toggleOver(d, el) { S.overCarry = el.checked; if (S.overCarry && !S.overSince) S.overSince = C.weekStart(C.today()); save(); render(); },
     toggleRoll(d, el) { S.rollover = el.checked; if (S.rollover && !S.rollSince) S.rollSince = C.weekStart(C.today()); save(); render(); },
@@ -1450,10 +1549,12 @@
     },
     payIou(d) {
       const i = S.ious.find((x) => x.id === d.id);
-      openSheet(`<h2>Partial payment</h2><p class="muted">${esc(i.person)} has ${fm(remaining(i))} left.</p><form data-form="pay"><input type="hidden" name="id" value="${i.id}"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" required><label class="f">Date</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
+      const me = i.dir === 'iOwe', full = d.full ? remaining(i).toFixed(2) : '';
+      openSheet(`<h2>${me ? 'You paid ' + esc(i.person) + ' back' : 'Partial payment'}</h2><p class="muted">${me ? 'You owe ' + fm(remaining(i)) + '.' : esc(i.person) + ' has ' + fm(remaining(i)) + ' left.'}</p><form data-form="pay"><input type="hidden" name="id" value="${i.id}"><label class="f">Amount paid</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" value="${full}" required><label class="f">Date</label><input type="date" name="date" value="${C.today()}">${me ? `<label class="mt check"><input type="checkbox" name="spend" checked>Count it as my spending money</label><p class="muted small">Leave this on when they paid for something of yours, so it counts against your week. Turn it off if you already logged that purchase.</p><label class="f">Paid with</label><select name="account">${S.accounts.map((a) => `<option value="${a.id}" ${a.id === S.lastAccount ? 'selected' : ''}>${esc(a.name)}${a.last4 ? ' ' + esc(a.last4) : ''}</option>`).join('')}<option value="cash">Cash or other</option></select>` : ''}<div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Log</button></div></form>`);
     },
     settleIou(d) {
       const i = S.ious.find((x) => x.id === d.id);
+      if (i.dir === 'iOwe') { actions.payIou({ id: i.id, full: 1 }); return; }
       if (!confirm('Mark ' + i.person + ' as fully paid?')) return;
       const r = remaining(i); if (r > 0) i.payments.push({ date: C.today(), amount: r });
       i.settled = true; save(); render(); toast('Settled');
@@ -1504,8 +1605,9 @@
       const acct = $('#impacct').value, im = ui.imp; let n = 0;
       im.items.forEach((x) => {
         if (!x.on || !(x.amount > 0)) return;
-        const hh = x.cat === '__hh';
-        const e = { id: uid(), amount: C.round2(x.amount), cat: hh ? 'other' : x.cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, forOther: '', takeout: x.cat === 'food', source: im.kind };
+        const hh = x.cat === '__hh', fund = x.cat === '__insfund' && !x.refund;
+        const cat = hh ? 'other' : x.cat === '__insfund' ? 'insurance' : x.cat;
+        const e = { id: uid(), amount: x.refund ? -C.round2(x.amount) : C.round2(x.amount), cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, fromFund: fund, forOther: '', takeout: !x.refund && cat === 'food', source: im.kind };
         S.expenses.push(e); applyBal(e);
         n++;
       });

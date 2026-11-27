@@ -1,5 +1,68 @@
 [
   {
+    "v": 26,
+    "date": "2026-11-27",
+    "title": "Spending tracking fixes",
+    "items": [
+      {
+        "type": "fix",
+        "text": "Months with five weeks now get five weeks of spending money. November is 300, not 260, so staying under every week never shows the month as over."
+      },
+      {
+        "type": "new",
+        "text": "Refunds and returns. Tick Refund or return when you add one and it gives that money back to the week it lands in. Refunds show in green."
+      },
+      {
+        "type": "new",
+        "text": "Bank imports now list money coming in too, unchecked. Check only the refunds. Paychecks and card payments stay out."
+      },
+      {
+        "type": "fix",
+        "text": "The real car insurance bill no longer counts twice. Use I paid the insurance bill on the Goals tab and it comes out of the insurance fund, not your budget."
+      },
+      {
+        "type": "new",
+        "text": "Imports have an Insurance bill, paid from the fund choice, and you can tick the same box when editing an old insurance charge."
+      },
+      {
+        "type": "fix",
+        "text": "Past months with no paycheck logged are marked Estimate. Tap Set this month's income on Budget, Month to type what you really got, even 0."
+      },
+      {
+        "type": "fix",
+        "text": "This month counts your usual income until all your paychecks are logged, and a month with three paychecks counts all three."
+      },
+      {
+        "type": "new",
+        "text": "Forgive button on IOUs people never paid back. Pick whether it comes out of this week's money or your savings. Delete it to undo."
+      },
+      {
+        "type": "fix",
+        "text": "Paying someone back now counts as your spending, with a box to turn it off if you already logged that purchase."
+      },
+      {
+        "type": "fix",
+        "text": "The Subscriptions budget now adds up your subscriptions in Recurring bills by itself. Add Prime there as a subscription and the total updates."
+      },
+      {
+        "type": "fix",
+        "text": "Purchases paid from savings now lower your saved this year total."
+      },
+      {
+        "type": "fix",
+        "text": "Bank imports catch more duplicates: the same amount within 3 days, or a bill you already checked off that month."
+      },
+      {
+        "type": "fix",
+        "text": "Switching between School and Summer no longer changes the income guess for older months."
+      },
+      {
+        "type": "fix",
+        "text": "A bill you added that already has payments cannot be removed by mistake, which would have pushed those payments into your weekly money."
+      }
+    ]
+  },
+  {
     "v": 25,
     "date": "2026-11-27",
     "title": "Month end overspend payoff",
