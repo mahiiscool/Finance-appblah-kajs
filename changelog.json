@@ -1,5 +1,40 @@
 [
   {
+    "v": 27,
+    "date": "2026-11-27",
+    "title": "To do reminders",
+    "items": [
+      {
+        "type": "new",
+        "text": "A To do card on Home lists anything you need to fill in yourself. Each one has a button that takes you straight there, and Later hides it until tomorrow."
+      },
+      {
+        "type": "new",
+        "text": "Waiting on a refund: open any purchase and tick I returned this, waiting on the refund. Home reminds you until you tap It came, and an imported refund for the same amount clears it on its own."
+      },
+      {
+        "type": "new",
+        "text": "Reminds you when a paycheck should have come in but is not logged, and when last month's income is only a guess."
+      },
+      {
+        "type": "new",
+        "text": "Reminds you about bills past their due day that are not checked off, and car insurance due in the next 2 weeks."
+      },
+      {
+        "type": "new",
+        "text": "Reminds you about people who owe you for over 2 weeks, and last month's leftover that still needs to go to savings."
+      },
+      {
+        "type": "new",
+        "text": "Nudges you when nothing has been logged in 3 days, when your last bank import was over a week ago, and at the end of each month to compare balances with your bank."
+      },
+      {
+        "type": "new",
+        "text": "Add to Calendar now also adds a monthly close out reminder on the 1st."
+      }
+    ]
+  },
+  {
     "v": 26,
     "date": "2026-11-27",
     "title": "Spending tracking fixes",

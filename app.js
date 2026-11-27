@@ -409,6 +409,48 @@
   function applyWidths() { document.querySelectorAll('[data-w]').forEach((el) => { el.style.width = el.dataset.w + '%'; }); }
 
   // ---------- HOME ----------
+  // ---------- reminders for things only you can fill in ----------
+  function todoItems() {
+    const t = C.today(), mk = C.monthKey(t), day = +t.slice(8), last = C.shiftMonthKey(mk, -1), lo = LO(), out = [];
+    const add = (k, text, act, btn, data, cls) => { if (!S.dismissed['todo' + k + t]) out.push({ k, text, act, btn, data: data || {}, cls }); };
+    // refunds you are waiting on
+    S.expenses.filter((e) => e.refundPending).sort((a, c) => (a.date < c.date ? -1 : 1)).forEach((e) => {
+      const d = C.daysBetween(e.pendSince || e.date, t);
+      add('rf' + e.id, `Waiting on a ${fm(e.amount)} refund for ${esc(e.note || catName(e.cat))}${d > 0 ? ', ' + d + ' day' + (d === 1 ? '' : 's') : ''}. Did it come back?`, 'refundCame', 'It came', { id: e.id }, d > 14 ? 'r' : '');
+    });
+    // paycheck that should have come by now
+    const pays = (S.paychecks || []).map((x) => x.date).sort();
+    if (pays.length) {
+      const next = C.addDays(pays[pays.length - 1], DAYS_PER[payFreq()] || 14);
+      if (C.daysBetween(next, t) >= 1) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next });
+    }
+    // last month income still a guess, only if you usually log paychecks
+    if (pays.length && last >= lo.start && /guess/.test(incomeNote(last))) add('inc' + last, `${C.monthName(last)} has no paycheck logged, so its income is a guess.`, 'fixIncome', 'Fix it', { mk: last });
+    // bills past their due day that are not checked off
+    const late = S.bills.filter((b) => b.day && dueDate(mk, b.day) < t && !billPaid(b, mk));
+    if (late.length) add('bills' + mk, `${late.length} bill${late.length === 1 ? '' : 's'} past due and not checked off: ${late.slice(0, 3).map((b) => esc(b.name)).join(', ')}${late.length > 3 ? ' and more' : ''}.`, 'openMore', 'Check off', { v: 'bills' }, 'r');
+    // car insurance coming due
+    const ins = S.goals.ins;
+    if (ins.due) { const dd = C.daysBetween(t, ins.due), paid = S.expenses.some((e) => e.fromFund && e.date >= C.addMonths(ins.due, -1));
+      if (dd <= 14 && !paid) add('ins' + ins.due, dd < 0 ? `Car insurance was due ${C.shortDate(ins.due)}. Log the payment from the fund.` : `Car insurance is due ${C.shortDate(ins.due)}${dd === 0 ? ', today' : ', in ' + dd + ' day' + (dd === 1 ? '' : 's')}. Log it from the fund when you pay.`, 'insPaySheet', 'I paid it', {}, dd < 0 ? 'r' : 'y'); }
+    // people who owe you for a while
+    const owed = S.ious.filter((i) => !i.settled && i.dir === 'owedToMe' && C.daysBetween(i.date, t) > 14);
+    if (owed.length) add('iou' + mk + owed.length, `Unpaid for over 2 weeks: ${owed.map((i) => esc(i.person) + ' ' + fm(remaining(i))).slice(0, 3).join(', ')}${owed.length > 3 ? ' and more' : ''}. Ask, settle, or forgive.`, 'tab', 'IOUs', { t: 'ious' });
+    // last month's leftover not moved to savings yet
+    if (last >= lo.start && lo.moved[last] === undefined && leftoverOf(last) > 0) add('lo' + last, `${C.monthName(last)} left you ${fm(leftoverOf(last))}. Move it to savings.`, 'moveLeftover', 'I moved it', { mk: last }, 'g');
+    // nothing logged lately
+    const lastLog = S.expenses.filter((e) => e.source !== 'bill').map((e) => e.date).filter((d) => d <= t).sort().pop();
+    if (lastLog && C.daysBetween(lastLog, t) >= 3) add('quiet' + lastLog, `Nothing logged since ${C.shortDate(lastLog)}. Any cash, Venmo, or card buys to add?`, 'add', 'Add one');
+    // bank import, once you have used it
+    if (S.lastImport && C.daysBetween(S.lastImport, t) >= 7) add('imp' + S.lastImport, `Last bank import was ${C.daysBetween(S.lastImport, t)} days ago. Import to catch refunds and anything you missed.`, 'openMore', 'Import', { v: 'import' });
+    // month end balance check
+    if (day >= 25 && S.balCheck !== mk && S.accounts.length) add('bal' + mk, 'End of the month: compare your card and bank balances with your bank app.', 'balDone', 'Done');
+    return out;
+  }
+  function todoCard() {
+    const items = todoItems(); if (!items.length) return '';
+    return card('To do', items.map((x) => `<div class="item"><p class="${x.cls || ''}">${x.text}</p><div class="btns"><button class="btn small primary" data-act="${x.act}" ${Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(String(v))}"`).join(' ')}>${x.btn}</button><button class="btn small" data-act="todoLater" data-k="${esc(x.k)}">Later</button></div></div>`).join(''));
+  }
   function Home() {
     const t = C.today(), mk = C.monthKey(t), b = budgetOf();
     let h = `<div class="head"><h1 class="title">Home</h1><button class="icon-btn" data-act="settings" aria-label="Settings">${ICON.gear}</button></div><div class="sub">${C.longDate(t)}</div>`;
@@ -416,6 +458,7 @@
 
     const ws = C.weekStart(t);
     h += card('Spending money this week', weekHero(ws, true) + weekBreakdown(ws) + '<div class="btns"><button class="btn" data-act="weekDetail">This week</button><button class="btn primary" data-act="add">Log spending</button></div>');
+    h += todoCard();
     if (new Date().getDay() === 0 && !S.dismissed['sun' + t]) {
       const open = S.ious.filter((i) => !i.settled).length;
       h += card('Sunday review', `<p class="med">Review the week and settle up</p>${(() => { const w = pastWeeks(1)[0]; return w ? `<p class="${w.sp > w.lim ? 'r' : 'g'}">Last week: ${fm(w.sp)} of ${fm(w.lim)}, ${fm(Math.abs(w.lim - w.sp))} ${w.sp > w.lim ? 'over' : 'under'}.</p>` : ''; })()}<p class="muted">${open ? open + ' open IOU' + (open === 1 ? '' : 's') + ' to look at.' : 'No open IOUs.'}</p><div class="btns"><button class="btn" data-act="sundayWeek">Last week's report</button><button class="btn" data-act="sundayIous">IOUs</button></div><button class="mt btn" data-act="dismissSun">Dismiss</button>`, 'note');
@@ -502,7 +545,7 @@
     return h;
   }
   function expRow(e) {
-    const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
+    const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.refundPending ? '<span class="pill y">Refund pending</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
     return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span>${e.amount < 0 ? `<b class="g">${fm(e.amount)} back</b>` : `<b>${fm(e.amount)}</b>`}</div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
   }
   function histMatches() {
@@ -633,7 +676,7 @@
       return `<div class="item"><div class="row"><span class="t">${esc(b.name)}</span><b>${fm(b.amount * 12)}<span class="muted small"> a year</span></b></div><div class="muted small">${lp ? 'Last marked paid ' + C.shortDate(lp) : 'Never marked paid'}${b.reviewed ? '. Checked ' + C.shortDate(b.reviewed) : ''}</div>${due ? `<p class="mt8 med">Still using it?</p><div class="btns"><button class="btn small" data-act="subKeep" data-id="${b.id}">Keep it</button><button class="btn small danger" data-act="subCancel" data-id="${b.id}">I cancelled it</button></div>` : ''}</div>`;
     }).join('') + '<p class="muted small mt8">Each one asks again every 3 months, so nothing renews without you noticing.</p>');
     const nd = S.bills.filter((b) => !b.day).length;
-    h += card('Reminders on your calendar', `<p class="muted">Adds each bill with a due day to your phone calendar as a monthly event, with an alert at 9 AM the day before. It also adds a weekly Sunday check in${S.goals.ins.due ? ' and your insurance due date' : ''}.</p>${nd ? `<p class="small y">${nd} bill${nd === 1 ? ' has' : 's have'} no due day and will be left out. Tap Edit to add one.</p>` : ''}<div class="btns"><button class="btn primary" data-act="icsOpen">Add to Calendar</button><button class="btn" data-act="icsShare">Share file</button></div><p class="muted small mt8">If you change a due day later, add them again and delete the old events.</p>`);
+    h += card('Reminders on your calendar', `<p class="muted">Adds each bill with a due day to your phone calendar as a monthly event, with an alert at 9 AM the day before. It also adds a weekly Sunday check in, a monthly close out on the 1st${S.goals.ins.due ? ' and your insurance due date' : ''}.</p>${nd ? `<p class="small y">${nd} bill${nd === 1 ? ' has' : 's have'} no due day and will be left out. Tap Edit to add one.</p>` : ''}<div class="btns"><button class="btn primary" data-act="icsOpen">Add to Calendar</button><button class="btn" data-act="icsShare">Share file</button></div><p class="muted small mt8">If you change a due day later, add them again and delete the old events.</p>`);
     return h;
   }
 
@@ -849,6 +892,9 @@
     const sun = C.addDays(C.weekStart(t), 7);
     L.push('BEGIN:VEVENT', 'UID:weekly-checkin@money.app', 'DTSTAMP:' + stamp, 'DTSTART:' + d8(sun) + 'T180000', 'DURATION:PT15M', 'RRULE:FREQ=WEEKLY;BYDAY=SU',
       'SUMMARY:Money: weekly check in', 'DESCRIPTION:' + q('Log anything you missed, read the weekly report, settle IOUs, and back up.'), ...alarm('PT0M', 'Weekly money check in'), 'END:VEVENT');
+    const m1 = C.shiftMonthKey(C.monthKey(t), 1) + '-01';
+    L.push('BEGIN:VEVENT', 'UID:monthly-closeout@money.app', 'DTSTAMP:' + stamp, 'DTSTART:' + d8(m1) + 'T180000', 'DURATION:PT15M', 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1',
+      'SUMMARY:Money: close out last month', 'DESCRIPTION:' + q('Log any missing paychecks and refunds, check off bills, compare balances with your bank, and move the leftover to savings.'), ...alarm('PT0M', 'Close out last month'), 'END:VEVENT');
     const ins = S.goals.ins;
     if (ins.due && ins.due >= t) L.push('BEGIN:VEVENT', 'UID:ins-' + ins.due + '@money.app', 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + d8(ins.due), 'DTEND;VALUE=DATE:' + d8(C.addDays(ins.due, 1)),
       'SUMMARY:' + q(ins.name + ' bill due'), ...alarm('-P6DT15H', ins.name + ' is due in a week'), 'END:VEVENT');
@@ -1161,6 +1207,7 @@
       <div id="personbox" ${e && e.forOther ? '' : 'hidden'}><input type="text" name="person" placeholder="Who owes you?" autocomplete="off" value="${esc(e ? e.forOther : '')}"></div>
       <label class="check"><input type="checkbox" name="oneTime" ${e && e.paidFromSavings ? 'checked' : ''}>One time, paid from savings</label>
       <label class="check"><input type="checkbox" name="household" ${e && e.household ? 'checked' : ''}>Household charge, ignore it</label>
+      ${e && e.amount > 0 ? `<label class="check"><input type="checkbox" name="pending" ${e.refundPending ? 'checked' : ''}>I returned this, waiting on the refund</label>` : ''}
       ${e && e.cat === 'insurance' && e.amount > 0 ? `<label class="check"><input type="checkbox" name="fromFund" ${e.fromFund ? 'checked' : ''}>The real insurance bill, paid from the insurance fund</label>` : ''}
       <div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div>
       ${e ? `<button class="mt btn danger" type="button" data-act="delExp" data-id="${e.id}">Delete expense</button>` : ''}</form>`);
@@ -1170,6 +1217,13 @@
 
   // ---------- forms ----------
   const forms = {
+    refundCame(fd) {
+      const e = S.expenses.find((x) => x.id === fd.get('id')); if (!e) return;
+      const amount = C.round2(C.num(fd.get('amount'))); if (!(amount > 0)) { toast('Enter the amount'); return; }
+      const r = { id: uid(), amount: -amount, cat: e.cat, note: 'Refund: ' + (e.note || catName(e.cat)), account: e.account, date: fd.get('date') || C.today(), paidFromSavings: e.paidFromSavings, household: e.household, forOther: '', takeout: false, source: 'manual' };
+      S.expenses.push(r); applyBal(r); e.refundPending = false; delete e.pendSince;
+      save(); closeSheet(); render(); toast(fm(amount) + ' refund saved');
+    },
     incomeFix(fd) {
       const mk = fd.get('mk'), raw = String(fd.get('amount') || '').trim();
       S.incomeFix = S.incomeFix || {};
@@ -1207,7 +1261,8 @@
       if (forOther && !person) { toast('Who was it for?'); return; }
       const old = id ? S.expenses.find((x) => x.id === id) : null;
       if (old && old.iouForgive && refund) { toast('A forgiven IOU cannot be a refund'); return; }
-      const rec = { amount: refund ? -amount : amount, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
+      const pend = !refund && !!fd.get('pending');
+      const rec = { amount: refund ? -amount : amount, refundPending: pend, pendSince: pend ? (old && old.refundPending && old.pendSince) || C.today() : undefined, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
       let exp = old, msg = refund ? 'Refund saved' : 'Saved';
       if (exp) { revertBal(exp); Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
       applyBal(exp);
@@ -1516,6 +1571,13 @@
       openSheet(`<h2>Cover with savings</h2><p class="muted">Use savings instead of making the next weeks pay it back. This week's spending money goes up by this amount.</p><form data-form="cover"><input type="hidden" name="ws" value="${ws}"><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${need.toFixed(2)}"><p class="muted small">It comes out of what you save this month, so your savings goes down by the same amount.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Cover it</button></div></form>${cv ? `<p class="muted small mt">Already covered this week: ${fm(cv)}.</p><button class="mt btn small danger" data-act="uncover" data-ws="${ws}">Undo cover</button>` : ''}`);
     },
     uncover(d) { S.covers = (S.covers || []).filter((c) => c.ws !== d.ws); save(); closeSheet(); render(); toast('Cover removed'); },
+    todoLater(d) { S.dismissed['todo' + d.k + C.today()] = true; save(); render(); },
+    balDone() { S.balCheck = C.monthKey(C.today()); save(); render(); toast('Nice. Fix any balance in Cards and balances if it was off.'); },
+    refundCame(d) {
+      const e = S.expenses.find((x) => x.id === d.id); if (!e) return;
+      openSheet(`<h2>Refund came back</h2><p class="muted">${esc(e.note || catName(e.cat))}, bought ${C.shortDate(e.date)}. It goes back into the week it lands in.</p><form data-form="refundCame"><input type="hidden" name="id" value="${e.id}"><label class="f">Amount back</label><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" value="${e.amount.toFixed(2)}" required><label class="f">Date it came</label><input type="date" name="date" value="${C.today()}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save refund</button></div></form><button class="mt btn" data-act="refundNo" data-id="${e.id}">It is not coming, stop reminding me</button>`);
+    },
+    refundNo(d) { const e = S.expenses.find((x) => x.id === d.id); if (e) { e.refundPending = false; delete e.pendSince; } save(); closeSheet(); render(); },
     fixIncome(d) {
       const mk = d.mk, fix = (S.incomeFix || {})[mk], p = loggedPay(mk);
       openSheet(`<h2>Income for ${C.monthName(mk)}</h2><p class="muted">${p ? 'Paychecks logged: ' + fm(p) + '.' : 'No paychecks logged.'} Type what you really got this month, even 0. Leave it empty to go back to automatic.</p><form data-form="incomeFix"><input type="hidden" name="mk" value="${mk}"><input class="amount" type="text" inputmode="decimal" name="amount" autocomplete="off" value="${typeof fix === 'number' ? fix.toFixed(2) : ''}" placeholder="Automatic"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
@@ -1609,8 +1671,10 @@
         const cat = hh ? 'other' : x.cat === '__insfund' ? 'insurance' : x.cat;
         const e = { id: uid(), amount: x.refund ? -C.round2(x.amount) : C.round2(x.amount), cat, note: x.desc, account: acct, date: x.date, paidFromSavings: false, household: hh, fromFund: fund, forOther: '', takeout: !x.refund && cat === 'food', source: im.kind };
         S.expenses.push(e); applyBal(e);
+        if (x.refund) { const w = S.expenses.find((p) => p.refundPending && C.cents(p.amount) === C.cents(-e.amount)); if (w) { w.refundPending = false; delete w.pendSince; } }
         n++;
       });
+      S.lastImport = C.today();
       S.lastAccount = acct; ui.imp = null; save(); render(); toast(n + ' saved');
     },
     // security
