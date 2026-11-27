@@ -1,5 +1,32 @@
 [
   {
+    "v": 37,
+    "date": "2026-11-27",
+    "title": "Android fixes",
+    "items": [
+      {
+        "type": "fix",
+        "text": "Saving a report file or the bill reminders for your calendar no longer fails when the phone's share menu refuses the file. It downloads the file instead, and Share report falls back to copying the text."
+      },
+      {
+        "type": "fix",
+        "text": "Pulling down on the screen no longer refreshes the page on Android, which could throw away a half filled form."
+      },
+      {
+        "type": "change",
+        "text": "Pop up forms are sized for the Android browser bar, so the Save button should never hide behind it."
+      },
+      {
+        "type": "change",
+        "text": "On Android, the phone unlock says fingerprint unlock instead of Face ID, and the calendar reminders file gets a proper name so the Calendar app opens it."
+      },
+      {
+        "type": "new",
+        "text": "The app now asks your browser to keep your data safe from automatic cleanup."
+      }
+    ]
+  },
+  {
     "v": 36,
     "date": "2026-11-27",
     "title": "Backup on Android",

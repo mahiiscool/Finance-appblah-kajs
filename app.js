@@ -2,6 +2,8 @@
 (function () {
   const C = Core, V = Vault;
   let S = null;
+  // The phone unlock is Face ID on iPhone and fingerprint or face on Android, so the wording follows the phone.
+  const BIO = /Android/i.test(navigator.userAgent) ? 'fingerprint unlock' : 'Face ID', bioCap = BIO.charAt(0).toUpperCase() + BIO.slice(1);
   let ui = { tab: 'home', bview: 'week', wOff: 0, mk: null, more: null, imp: null, bmk: null, rmk: null, hist: 40, lastCat: 'food', pendingBackup: null };
   let hiddenAt = 0, saveT = null, dirty = false;
 
@@ -1198,9 +1200,11 @@
     if (r.saved) lines.push('', 'Saved: ' + fm(r.saved));
     return lines.join('\n');
   }
-  function saveFile(text, name, type) {
+  async function saveFile(text, name, type) {
     const file = new File([text], name, { type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: name });
+    // Some phones refuse the share sheet. Anything other than cancelling falls back to a plain download.
+    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; } }
+    catch (e) { if (e && e.name === 'AbortError') throw e; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 
@@ -1219,7 +1223,7 @@
     if (V.isAuto()) { box.innerHTML = ''; return; }
     if (!(await V.faceSupported())) { box.innerHTML = ''; return; }
     const on = await V.faceEnabled();
-    box.innerHTML = `<button class="mt btn" data-act="${on ? 'faceOff' : 'faceOn'}">${on ? 'Turn off Face ID' : 'Turn on Face ID'}</button>`;
+    box.innerHTML = `<button class="mt btn" data-act="${on ? 'faceOff' : 'faceOn'}">${on ? 'Turn off ' + BIO : 'Turn on ' + BIO}</button>`;
   }
 
   function BankView() {
@@ -1644,11 +1648,11 @@
       const n = fd.get('n') || '';
       if (!/^\d{6}$/.test(n)) { toast('Use exactly 6 digits'); return; }
       if (n !== fd.get('n2')) { toast('New PINs do not match'); return; }
-      try { await flush(); await V.changePass(fd.get('o') || '', n, S); setPinHint(true); closeSheet(); toast('PIN changed. Face ID was turned off.'); fillFaceBox(); }
+      try { await flush(); await V.changePass(fd.get('o') || '', n, S); setPinHint(true); closeSheet(); toast('PIN changed. ' + bioCap + ' was turned off.'); fillFaceBox(); }
       catch (e) { toast(e.message); }
     },
     async faceon(fd) {
-      try { await V.enableFace(fd.get('p') || ''); closeSheet(); toast('Face ID is on'); fillFaceBox(); }
+      try { await V.enableFace(fd.get('p') || ''); closeSheet(); toast(bioCap + ' is on'); fillFaceBox(); }
       catch (e) { toast(e.message); }
     },
     async restore(fd) {
@@ -1729,9 +1733,10 @@
     async shareReport() {
       const text = reportText(report());
       try {
-        if (navigator.share) await navigator.share({ title: 'Spending report', text });
-        else { await navigator.clipboard.writeText(text); toast('Copied'); }
-      } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); }
+        let shared = false;
+        if (navigator.share) { try { await navigator.share({ title: 'Spending report', text }); shared = true; } catch (e) { if (e && e.name === 'AbortError') return; } }
+        if (!shared) { await navigator.clipboard.writeText(text); toast('Copied'); }
+      } catch (e) { toast('Could not share'); }
     },
     async csvReport() {
       const r = report(), q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -1773,7 +1778,7 @@
     subCancel(d) { const b = S.bills.find((x) => x.id === d.id); if (b && confirm('Remove ' + b.name + ' from your bills? Past payments stay in your history.')) { S.bills = S.bills.filter((x) => x !== b); save(); render(); toast('Removed. That saves ' + fm(b.amount * 12) + ' a year.'); } },
     icsOpen() {
       const url = URL.createObjectURL(new Blob([icsText()], { type: 'text/calendar' }));
-      const a = document.createElement('a'); a.href = url; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const a = document.createElement('a'); a.href = url; if (/Android/i.test(navigator.userAgent)) a.download = 'money-reminders.ics'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
     },
     async icsShare() { try { await saveFile(icsText(), 'money-reminders.ics', 'text/calendar'); } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share'); } },
     fixBudget() {
@@ -1977,9 +1982,9 @@
       openSheet(`<h2>Change PIN</h2><form data-form="chpass"><label class="f">Current passcode or PIN</label><input type="password" name="o" autocomplete="current-password" required><label class="f">New 6 digit PIN</label><input type="password" name="n" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><label class="f">Repeat new PIN</label><input type="password" name="n2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Change</button></div></form>`);
     },
     faceOn() {
-      openSheet(`<h2>Turn on Face ID</h2><p class="muted">Enter your PIN once to link it.</p><form data-form="faceon"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Continue</button></div></form>`);
+      openSheet(`<h2>Turn on ${BIO}</h2><p class="muted">Enter your PIN once to link it.</p><form data-form="faceon"><input type="password" name="p" autocomplete="current-password" required><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Continue</button></div></form>`);
     },
-    async faceOff() { await V.disableFace(); toast('Face ID is off'); fillFaceBox(); },
+    async faceOff() { await V.disableFace(); toast(bioCap + ' is off'); fillFaceBox(); },
     async exportBackup() {
       let text, name;
       try { await flush(); text = await V.exportBackup(); name = 'money-backup-' + C.today() + '.json'; }
@@ -2096,7 +2101,7 @@
       if (!exists) { welcome(); return; }
       const face = exists && (await V.faceEnabled());
       const pin = exists && getPinHint();
-      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="mt btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="mt btn" name="persona" value="blank" type="submit">I\'m not Mahi</button><p class="mt12 muted small">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="mt12 btn" data-act="faceUnlock">Unlock with Face ID</button>' : ''}</div>`;
+      $('#app').innerHTML = `<div class="lock"><h1>${exists ? 'Welcome back' : 'Create a PIN'}</h1><p class="muted">${exists ? (pin ? 'Enter your PIN to unlock.' : 'Enter your passcode to unlock.') : 'Choose a 6 digit PIN. '}${exists ? '' : 'This encrypts everything on this device. If you forget it, the data cannot be recovered, so keep a backup.'}</p><form data-form="${exists ? 'unlock' : 'setup'}"><input type="password" name="p" ${pin || !exists ? 'inputmode="numeric" pattern="[0-9]*" maxlength="6"' : ''} ${pin ? 'data-auto="1"' : ''} autocomplete="${exists ? 'current-password' : 'new-password'}" placeholder="${pin || !exists ? 'PIN' : 'Passcode'}" required>${exists ? '' : '<input type="password" name="p2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="Repeat PIN" class="mt" required>'}<div class="err" id="lockerr"></div><button class="btn primary" id="lockbtn" type="submit">${exists ? 'Unlock' : 'Create'}</button>${exists ? '' : '<button class="mt btn" name="nolock" value="1" type="submit" formnovalidate>Skip, no PIN</button>'}${exists ? '' : '<button class="mt btn" name="persona" value="blank" type="submit">I\'m not Mahi</button><p class="mt12 muted small">Mahi\'s budget numbers are preloaded. Tap I\'m not Mahi for a blank setup where you enter your own numbers.</p>'}</form>${face ? '<button class="mt12 btn" data-act="faceUnlock">Unlock with ' + BIO + '</button>' : ''}</div>`;
       const p = $('input[name=p]'); if (p) setTimeout(() => p.focus(), 50);
       if (face && !forceUnlock) { /* user taps the button to start Face ID */ }
     });
@@ -2113,10 +2118,11 @@
   actions.wPick = (d) => { ui.wpick = d.v || null; welcome(); };
   actions.faceUnlock = async () => {
     try { const st = await V.unlockFace(); S = Object.assign(defaultState(), st || {}); startSession(); }
-    catch (e) { const err = $('#lockerr'); if (err) err.textContent = 'Face ID did not work. Use your passcode.'; }
+    catch (e) { const err = $('#lockerr'); if (err) err.textContent = bioCap + ' did not work. Use your passcode.'; }
   };
   function startSession() {
     fails = 0; hiddenAt = 0; ui.tab = 'home'; ui.more = null;
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* not supported */ }
     if (S.autoBal && !S.balSince) { S.balSince = C.today(); save(); }
     applyBudgetNov2026();
     removeDadPayment();
