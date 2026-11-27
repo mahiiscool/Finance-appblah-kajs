@@ -1,5 +1,36 @@
 [
   {
+    "v": 28,
+    "date": "2026-11-27",
+    "title": "Time off plan and trip spending",
+    "items": [
+      {
+        "type": "new",
+        "text": "Time off or less pay: on Budget, Month, go to any month and type the pay you expect. The app shows your usual pay, what you miss, and how much comes out of savings."
+      },
+      {
+        "type": "new",
+        "text": "The Time off plan card shows the plan up top and what actually happened below it, so you can watch the real numbers as paychecks come in."
+      },
+      {
+        "type": "new",
+        "text": "A time off month is covered by savings, so being short that month never cuts into next month's weekly money."
+      },
+      {
+        "type": "new",
+        "text": "To do reminds you how much to move from savings to checking for a time off month, and I moved it updates both balances."
+      },
+      {
+        "type": "change",
+        "text": "The missing paycheck reminder stays quiet in a time off month once the pay you expected is logged."
+      },
+      {
+        "type": "new",
+        "text": "Trip spending: tick Trip spending when you add a purchase and it comes out of your trip fund instead of your weekly money."
+      }
+    ]
+  },
+  {
     "v": 27,
     "date": "2026-11-27",
     "title": "To do reminders",

@@ -115,7 +115,7 @@
   // ---------- data helpers ----------
   const budgetOf = (m) => S.budget[m || S.mode];
   const catName = (id) => { if (id === '__hh') return 'Household (ignored)'; const c = S.cats.find((x) => x.id === id); return c ? c.name : 'Other'; };
-  const counted = (e) => !e.paidFromSavings && !e.forOther && !e.household && !e.fromFund;
+  const counted = (e) => !e.paidFromSavings && !e.forOther && !e.household && !e.fromFund && !e.fromTrip;
   function incomeOf(mode) {
     const b = S.budget[mode];
     if (mode === 'school') return b.income;
@@ -171,18 +171,22 @@
   // Income for a month: a fixed number you typed wins, then logged paychecks, then your usual income as an estimate.
   // Which mode (school or summer) a month was in, so old months keep the right usual income.
   function modeFor(mk) { const l = (S.modeLog || []).filter((x) => x.mk <= mk).sort((a, c) => (a.mk < c.mk ? -1 : 1)); return l.length ? l[l.length - 1].mode : S.mode; }
+  // Time off: a month where you expect less pay than usual, with the gap covered from savings.
+  const offOf = (mk) => (S.timeOff || {})[mk];
+  const usualPay = (mk) => incomeOf(modeFor(mk));
+  const expectPay = (mk) => (offOf(mk) ? offOf(mk).income : usualPay(mk));
   const loggedPay = (mk) => C.round2(sum((S.paychecks || []).filter((x) => C.monthKey(x.date) === mk), (x) => x.amount));
   function monthIncome(mk) {
     const fix = (S.incomeFix || {})[mk]; if (typeof fix === 'number') return fix;
-    const p = loggedPay(mk), est = incomeOf(modeFor(mk));
+    const p = loggedPay(mk), est = expectPay(mk);
     if (mk >= C.monthKey(C.today())) return Math.max(p, est);
     return p > 0 ? p : est;
   }
   function incomeNote(mk) {
     if (typeof (S.incomeFix || {})[mk] === 'number') return 'You set this month\'s income.';
-    const p = loggedPay(mk), est = incomeOf(modeFor(mk));
-    if (mk >= C.monthKey(C.today())) return p >= est ? '' : p > 0 ? `${fm(p)} logged so far. Counting your usual ${fm(est)} until the rest comes in.` : `No paycheck logged yet. Counting your usual ${fm(est)}.`;
-    return p > 0 ? '' : `No paycheck logged. This is your usual ${fm(est)}, so it is a guess.`;
+    const p = loggedPay(mk), est = expectPay(mk), what = offOf(mk) ? 'the ' + fm(est) + ' you expect with time off' : 'your usual ' + fm(est);
+    if (mk >= C.monthKey(C.today())) return p >= est ? '' : p > 0 ? `${fm(p)} logged so far. Counting ${what} until the rest comes in.` : `No paycheck logged yet. Counting ${what}.`;
+    return p > 0 ? '' : `No paycheck logged. This is ${what}, so it is a guess.`;
   }
   const monthOut = (mk) => C.round2(sum(S.expenses.filter((e) => counted(e) && C.monthKey(e.date) === mk), (e) => e.amount));
   const leftoverOf = (mk) => C.round2(monthIncome(mk) - monthOut(mk));
@@ -191,10 +195,18 @@
     const flex = monthFlex(mk), plan = monthPlan(mk), over = C.round2(Math.max(0, flex - plan)), inc = monthIncome(mk), out = monthOut(mk), lv = C.round2(inc - out);
     return { flex, plan, over, inc, out, lv, short: C.round2(Math.max(0, -lv)) };
   }
+  function offPlan(mk) {
+    const o = offOf(mk); if (!o) return null;
+    const b = budgetOf(), bills = C.round2(sum(S.cats.filter((c) => c.kind === 'fixed'), (c) => b.amounts[c.id] || 0));
+    const usual = usualPay(mk), expect = o.income, plan = C.round2(bills + monthPlan(mk));
+    const done = mk < C.monthKey(C.today()), inc = monthIncome(mk), out = monthOut(mk);
+    return { usual, expect, bills, weekly: monthPlan(mk), plan, missPlan: C.round2(Math.max(0, usual - expect)), fromSavPlan: C.round2(Math.max(0, plan - expect)),
+      inc, out, missed: C.round2(Math.max(0, usual - inc)), short: C.round2(Math.max(0, out - inc)), done, moved: o.moved || 0, note: o.note || '' };
+  }
   function monthOverNote(mk, done) {
     const o = monthOver(mk); if (!o.over) return '';
     if (o.lv >= 0) return `<p class="small y">${fm(o.over)} over on weekly money this month. It ${done ? 'came' : 'is coming'} out of your savings${done ? '' : ', so you will save that much less'}.</p>`;
-    return `<p class="small r">${fm(o.over)} over on weekly money, and you spent ${fm(o.short)} more than your income of ${fm(o.inc)}.${S.overCarry && S.overSettle !== false ? ' The part savings could not cover carries into next month.' : ''}</p>`;
+    return `<p class="small r">${fm(o.over)} over on weekly money, and you spent ${fm(o.short)} more than your income of ${fm(o.inc)}.${offOf(mk) ? ' This is a time off month, so savings covers it and nothing carries into next month.' : S.overCarry && S.overSettle !== false ? ' The part savings could not cover carries into next month.' : ''}</p>`;
   }
   // This month, assuming every bill gets paid and all the weekly money gets spent.
   function projectedLeftover(mk) {
@@ -215,7 +227,7 @@
     const before = lo.start.slice(0, 4) === yr ? lo.before || 0 : 0;
     // One time purchases paid from savings take money back out of what you saved.
     const from = (lo.start > yr + '-01' ? lo.start : yr + '-01') + '-01';
-    const spent = C.round2(sum(S.expenses.filter((e) => e.paidFromSavings && !e.household && e.date >= from && e.date.slice(0, 4) === yr), (e) => e.amount));
+    const spent = C.round2(sum(S.expenses.filter((e) => (e.paidFromSavings || e.fromTrip) && !e.household && e.date >= from && e.date.slice(0, 4) === yr), (e) => e.amount));
     return { total: C.round2(before + sum(months, (m) => m.v) - spent), months, before, spent };
   }
   function savingsCard() {
@@ -285,6 +297,7 @@
     } else t = sum(g.contribs, (c) => c.amount);
     if (k === 'mom') t += sum(S.expenses.filter((e) => e.cat === 'mompay' && counted(e)), (e) => e.amount);
     if (k === 'gen') t -= sum(S.expenses.filter((e) => e.paidFromSavings), (e) => e.amount);
+    if (k === 'trip') t -= sum(S.expenses.filter((e) => e.fromTrip), (e) => e.amount);
     return C.round2(t);
   }
   function savedInMonth(mk) {
@@ -348,7 +361,7 @@
     let w = rs && os ? (rs < os ? rs : os) : rs || os; const early = C.addDays(ws, -84); if (w < early) w = early;
     let carry = 0, prevMk = null;
     // New month: overspending still owed gets paid from last month's leftover savings. Only what savings could not cover keeps carrying.
-    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 ? 0 : Math.max(carry, lv); } prevMk = mk; };
+    const settle = (mk) => { if (prevMk && mk !== prevMk && carry < 0 && S.overSettle !== false) { const lv = leftoverOf(prevMk); carry = lv >= 0 || offOf(prevMk) ? 0 : Math.max(carry, lv); } prevMk = mk; };
     for (; w < ws; w = C.addDays(w, 7)) {
       settle(C.monthKey(w));
       const left = C.round2(base + carry + coverOf(w) - weekSpend(w));
@@ -422,10 +435,15 @@
     const pays = (S.paychecks || []).map((x) => x.date).sort();
     if (pays.length) {
       const next = C.addDays(pays[pays.length - 1], DAYS_PER[payFreq()] || 14);
-      if (C.daysBetween(next, t) >= 1) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next });
+      const nm = C.monthKey(next), off = offOf(nm);
+      if (C.daysBetween(next, t) >= 1 && !(off && loggedPay(nm) >= off.income)) add('pay' + next, `Your paycheck was due around ${C.shortDate(next)}. Log it so your savings stay right.`, 'paycheck', 'Log it', { date: next });
     }
     // last month income still a guess, only if you usually log paychecks
     if (pays.length && last >= lo.start && /guess/.test(incomeNote(last))) add('inc' + last, `${C.monthName(last)} has no paycheck logged, so its income is a guess.`, 'fixIncome', 'Fix it', { mk: last });
+    // time off: money to move from savings, this month and last month
+    [last, mk].forEach((m) => { const op = offPlan(m); if (!op || m < lo.start) return;
+      const need = C.round2((op.done ? op.short : Math.max(op.short, op.fromSavPlan)) - op.moved);
+      if (need >= 1) add('off' + m + op.moved, `${C.monthName(m)}${op.note ? ' (' + esc(op.note) + ')' : ''}: ${op.done ? 'came up' : 'is about'} ${fm(need)} short. Move it from savings to checking when you need it.`, 'offMoved', 'I moved it', { mk: m, amt: need }, 'y'); });
     // bills past their due day that are not checked off
     const late = S.bills.filter((b) => b.day && dueDate(mk, b.day) < t && !billPaid(b, mk));
     if (late.length) add('bills' + mk, `${late.length} bill${late.length === 1 ? '' : 's'} past due and not checked off: ${late.slice(0, 3).map((b) => esc(b.name)).join(', ')}${late.length > 3 ? ' and more' : ''}.`, 'openMore', 'Check off', { v: 'bills' }, 'r');
@@ -533,19 +551,30 @@
       const amt = b.amounts[c.id] || 0, sp = ms[c.id] || 0, pct = amt ? sp / amt : (sp ? 2 : 0), cls = C.status(pct);
       return `<div class="item"><div class="row"><span class="t">${esc(c.name)}</span><span class="${cls}">${fm(sp)} of ${fm(amt)}</span></div>${bar(pct, cls)}<div class="muted small">${sp > amt ? fm(sp - amt) + ' over' : fm(amt - sp) + ' left'}</div></div>`;
     }).join('');
+    const op = offPlan(mk);
+    if (op) {
+      const row = (l, v, cls) => `<div class="row item"><span>${l}</span><b class="${cls || ''}">${fm(v)}</b></div>`;
+      let inner = `${op.note ? `<p class="muted">${esc(op.note)}</p>` : ''}<p class="label mt8">Plan</p>` + row('Usual income', op.usual) + row('Expected with time off', op.expect) + row('Pay you miss', op.missPlan, 'r') +
+        row('Bills and fixed costs', op.bills) + row(`Weekly money, ${weeksOf(mk).length} weeks`, op.weekly) + row('Coming out of savings', op.fromSavPlan, op.fromSavPlan ? 'y' : 'g');
+      inner += `<p class="label mt">${op.done ? 'What happened' : 'So far'}</p>` + row(op.done ? 'Income you got' : 'Income counted', op.inc) + row(op.done ? 'Pay you missed' : 'Pay missed so far', op.missed, op.missed ? 'r' : '') + row('Spent', op.out) +
+        row(op.done ? 'Came out of savings' : 'Short right now', op.short, op.short ? 'y' : 'g') + (op.moved ? row('Moved from savings so far', op.moved, 'g') : '');
+      inner += `<p class="muted small mt8">${op.done ? '' : 'Until all your pay is logged, income counted is the amount you expect. '}Pay you missed is your usual pay minus what came in. Coming out of savings is what you spend minus what came in. Weekly overspending in this month is covered by savings too, so nothing carries into next month.</p>`;
+      h += card('Time off plan', inner, 'note');
+    }
     h += card('Spent vs budget', rows);
     { const o = monthOver(mk), done = mk < C.monthKey(C.today());
       const inote = incomeNote(mk);
-      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<button class="btn small mt8" data-act="fixIncome" data-mk="${mk}">Set this month's income</button><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
+      h += card('Month result', `<div class="row item"><span>Income${inote && !/set this/.test(inote) ? '<span class="pill y">Estimate</span>' : ''}</span><b>${fm(o.inc)}</b></div>${inote ? `<p class="muted small">${inote}</p>` : ''}<div class="btns"><button class="btn small" data-act="fixIncome" data-mk="${mk}">Set this month's income</button><button class="btn small" data-act="offSheet" data-mk="${mk}">${offOf(mk) ? 'Edit time off' : 'Time off or less pay'}</button></div><div class="row item"><span>Spent</span><b>${fm(o.out)}</b></div><div class="row item"><span>${o.lv >= 0 ? (done ? 'Saved' : 'Left so far') : 'Over your income'}</span><b class="${o.lv >= 0 ? 'g' : 'r'}">${fm(Math.abs(o.lv))}</b></div><div class="row item"><span>Weekly money</span><b class="${o.over ? 'r' : 'g'}">${fm(o.flex)} of ${fm(o.plan)}</b></div>` + (monthOverNote(mk, done) || `<p class="small g">Weekly money stayed under the plan this month.</p>`)); }
     const fs = sum(S.expenses.filter((e) => e.paidFromSavings && C.monthKey(e.date) === mk), (e) => e.amount);
     const fo = sum(S.expenses.filter((e) => e.forOther && C.monthKey(e.date) === mk), (e) => e.amount);
     const hh = sum(S.expenses.filter((e) => e.household && C.monthKey(e.date) === mk), (e) => e.amount);
     const fu = sum(S.expenses.filter((e) => e.fromFund && C.monthKey(e.date) === mk), (e) => e.amount);
-    if (fs || fo || hh || fu) h += card('Not counted', `${fu ? `<div class="row"><span>Insurance bill, paid from the fund</span><b>${fm(fu)}</b></div>` : ''}${hh ? `<div class="row"><span>Household, ignored</span><b>${fm(hh)}</b></div>` : ''}${fs ? `<div class="row"><span>Paid from savings</span><b>${fm(fs)}</b></div>` : ''}${fo ? `<div class="row"><span>Bought for others</span><b>${fm(fo)}</b></div>` : ''}`);
+    const ft = sum(S.expenses.filter((e) => e.fromTrip && C.monthKey(e.date) === mk), (e) => e.amount);
+    if (fs || fo || hh || fu || ft) h += card('Not counted', `${ft ? `<div class="row"><span>Trip, paid from the trip fund</span><b>${fm(ft)}</b></div>` : ''}${fu ? `<div class="row"><span>Insurance bill, paid from the fund</span><b>${fm(fu)}</b></div>` : ''}${hh ? `<div class="row"><span>Household, ignored</span><b>${fm(hh)}</b></div>` : ''}${fs ? `<div class="row"><span>Paid from savings</span><b>${fm(fs)}</b></div>` : ''}${fo ? `<div class="row"><span>Bought for others</span><b>${fm(fo)}</b></div>` : ''}`);
     return h;
   }
   function expRow(e) {
-    const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.refundPending ? '<span class="pill y">Refund pending</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
+    const tags = (e.amount < 0 ? '<span class="pill g">Refund</span>' : '') + (e.refundPending ? '<span class="pill y">Refund pending</span>' : '') + (e.fromFund ? '<span class="pill">Insurance fund</span>' : '') + (e.iouForgive ? '<span class="pill y">Forgiven IOU</span>' : '') + (e.iouPay ? '<span class="pill">IOU payback</span>' : '') + (e.paidFromSavings ? '<span class="pill">Savings</span>' : '') + (e.fromTrip ? '<span class="pill">Trip</span>' : '') + (e.household ? '<span class="pill">Household</span>' : '') + (e.forOther ? `<span class="pill y">For ${esc(e.forOther)}</span>` : '') + (e.receipt ? '<span class="pill">Receipt</span>' : '');
     return `<div class="ptr item" data-act="editExp" data-id="${e.id}"><div class="row"><span class="t">${esc(e.note || catName(e.cat))}${tags}</span>${e.amount < 0 ? `<b class="g">${fm(e.amount)} back</b>` : `<b>${fm(e.amount)}</b>`}</div><div class="muted small">${C.shortDate(e.date)}, ${esc(catName(e.cat))}</div></div>`;
   }
   function histMatches() {
@@ -797,7 +826,7 @@
     const accts = Object.keys(r.byAcct);
     if (accts.length > 1 || (accts.length && S.accounts.length > 1)) h += card('By account', accts.map((k) => `<div class="row item"><span>${esc(k)}</span><b>${fm(r.byAcct[k])}</b></div>`).join(''));
 
-    const ex = [['Insurance bill, paid from the fund', r.fund], ['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
+    const ex = [['Trip, paid from the trip fund', r.trip], ['Insurance bill, paid from the fund', r.fund], ['Paid from savings', r.fromSav], ['Covered for others (IOUs)', r.others], ['Household bills', r.hh]].filter((x) => x[1] > 0);
     if (ex.length) h += card('Not counted in your budget', ex.map((x) => `<div class="row item"><span>${x[0]}</span><b>${fm(x[1])}</b></div>`).join(''));
 
     const sv = [['Paychecks', r.paid], ['Saved toward goals', r.saved], ['IOU payments back to you', r.iouIn]].filter((x) => x[1] > 0);
@@ -851,7 +880,7 @@
       refunds: C.round2(-sum(list.filter((e) => e.amount < 0), (e) => e.amount)),
       big: list.slice().sort((a, c) => c.amount - a.amount)[0],
       top: Object.values(groups).sort((a, c) => c.v - a.v).slice(0, 5),
-      fromSav: s((e) => e.paidFromSavings && !e.household), fund: s((e) => e.fromFund), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
+      fromSav: s((e) => e.paidFromSavings && !e.household), fund: s((e) => e.fromFund), trip: s((e) => e.fromTrip), others: s((e) => e.forOther && !e.household && !e.paidFromSavings), hh: s((e) => e.household)
     };
   }
   function trendHTML(r) {
@@ -1206,6 +1235,7 @@
       <label class="mt check"><input type="checkbox" name="forOther" data-toggle="personbox" ${e && e.forOther ? 'checked' : ''}>Bought for someone else</label>
       <div id="personbox" ${e && e.forOther ? '' : 'hidden'}><input type="text" name="person" placeholder="Who owes you?" autocomplete="off" value="${esc(e ? e.forOther : '')}"></div>
       <label class="check"><input type="checkbox" name="oneTime" ${e && e.paidFromSavings ? 'checked' : ''}>One time, paid from savings</label>
+      <label class="check"><input type="checkbox" name="trip" ${e && e.fromTrip ? 'checked' : ''}>Trip spending, paid from the ${esc(S.goals.trip.name || 'trip fund')}</label>
       <label class="check"><input type="checkbox" name="household" ${e && e.household ? 'checked' : ''}>Household charge, ignore it</label>
       ${e && e.amount > 0 ? `<label class="check"><input type="checkbox" name="pending" ${e.refundPending ? 'checked' : ''}>I returned this, waiting on the refund</label>` : ''}
       ${e && e.cat === 'insurance' && e.amount > 0 ? `<label class="check"><input type="checkbox" name="fromFund" ${e.fromFund ? 'checked' : ''}>The real insurance bill, paid from the insurance fund</label>` : ''}
@@ -1217,6 +1247,14 @@
 
   // ---------- forms ----------
   const forms = {
+    timeOff(fd) {
+      const mk = fd.get('mk'), inc = C.round2(C.num(fd.get('income')));
+      if (!(inc >= 0) || String(fd.get('income')).trim() === '') { toast('Enter what you expect, even 0'); return; }
+      S.timeOff = S.timeOff || {}; const old = S.timeOff[mk] || {};
+      S.timeOff[mk] = { income: inc, note: (fd.get('note') || '').trim(), moved: old.moved || 0 };
+      save(); closeSheet(); render();
+      toast(S.incomeFix && typeof S.incomeFix[mk] === 'number' ? 'Saved. A typed income for this month still wins, so clear it in Set this month\'s income.' : 'Time off saved');
+    },
     refundCame(fd) {
       const e = S.expenses.find((x) => x.id === fd.get('id')); if (!e) return;
       const amount = C.round2(C.num(fd.get('amount'))); if (!(amount > 0)) { toast('Enter the amount'); return; }
@@ -1262,7 +1300,7 @@
       const old = id ? S.expenses.find((x) => x.id === id) : null;
       if (old && old.iouForgive && refund) { toast('A forgiven IOU cannot be a refund'); return; }
       const pend = !refund && !!fd.get('pending');
-      const rec = { amount: refund ? -amount : amount, refundPending: pend, pendSince: pend ? (old && old.refundPending && old.pendSince) || C.today() : undefined, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !!fd.get('oneTime'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
+      const rec = { amount: refund ? -amount : amount, refundPending: pend, pendSince: pend ? (old && old.refundPending && old.pendSince) || C.today() : undefined, fromFund: !refund && cat === 'insurance' && !!fd.get('fromFund'), cat, note: (fd.get('note') || '').trim(), account: fd.get('account'), date: fd.get('date') || C.today(), paidFromSavings: !fd.get('trip') && !!fd.get('oneTime'), fromTrip: !!fd.get('trip'), household: !!fd.get('household'), forOther: forOther ? person : '', takeout: !refund && cat === 'food' && !fd.get('household') };
       let exp = old, msg = refund ? 'Refund saved' : 'Saved';
       if (exp) { revertBal(exp); Object.assign(exp, rec); } else { exp = Object.assign({ id: uid(), source: 'manual' }, rec); S.expenses.push(exp); }
       applyBal(exp);
@@ -1571,6 +1609,17 @@
       openSheet(`<h2>Cover with savings</h2><p class="muted">Use savings instead of making the next weeks pay it back. This week's spending money goes up by this amount.</p><form data-form="cover"><input type="hidden" name="ws" value="${ws}"><label class="f">Amount</label><input type="text" inputmode="decimal" name="amount" value="${need.toFixed(2)}"><p class="muted small">It comes out of what you save this month, so your savings goes down by the same amount.</p><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Cover it</button></div></form>${cv ? `<p class="muted small mt">Already covered this week: ${fm(cv)}.</p><button class="mt btn small danger" data-act="uncover" data-ws="${ws}">Undo cover</button>` : ''}`);
     },
     uncover(d) { S.covers = (S.covers || []).filter((c) => c.ws !== d.ws); save(); closeSheet(); render(); toast('Cover removed'); },
+    offSheet(d) {
+      const mk = d.mk, o = offOf(mk), usual = usualPay(mk);
+      openSheet(`<h2>Time off in ${C.monthName(mk)}</h2><p class="muted">Your usual pay is ${fm(usual)} a month. Type what you expect to get this month instead. The app shows what you miss and what comes out of savings, and the month does not count against your weekly money afterward.</p><form data-form="timeOff"><input type="hidden" name="mk" value="${mk}"><label class="f">Pay you expect this month</label><input class="amount" type="text" inputmode="decimal" name="income" autocomplete="off" value="${o ? o.income.toFixed(2) : ''}" placeholder="${usual.toFixed(2)}" required><p class="muted small">Tip: one paycheck instead of two is about ${fm(perCheck())}.</p><label class="f">Note</label><input type="text" name="note" autocomplete="off" placeholder="Optional, like Florida trip" value="${esc(o ? o.note || '' : '')}"><div class="btns"><button class="btn" type="button" data-act="closeSheet">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>${o ? `<button class="mt btn danger" data-act="offDel" data-mk="${mk}">Remove time off</button>` : ''}`);
+    },
+    offDel(d) { if (S.timeOff) delete S.timeOff[d.mk]; save(); closeSheet(); render(); toast('Time off removed'); },
+    offMoved(d) {
+      const o = offOf(d.mk), amt = C.round2(+d.amt); if (!o || !(amt > 0)) return;
+      o.moved = C.round2((o.moved || 0) + amt);
+      if (S.autoBal) { const chk = S.accounts.find((a) => a.type === 'checking'), sav = S.accounts.find((a) => a.type === 'savings'); if (chk && sav) { chk.balance = C.round2((chk.balance || 0) + amt); sav.balance = C.round2((sav.balance || 0) - amt); } }
+      save(); render(); toast(fm(amt) + ' moved from savings');
+    },
     todoLater(d) { S.dismissed['todo' + d.k + C.today()] = true; save(); render(); },
     balDone() { S.balCheck = C.monthKey(C.today()); save(); render(); toast('Nice. Fix any balance in Cards and balances if it was off.'); },
     refundCame(d) {
