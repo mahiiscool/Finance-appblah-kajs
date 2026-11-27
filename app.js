@@ -556,7 +556,7 @@
     const add = (k, text, act, btn, data, cls, skip) => { if (!S.dismissed['todo' + k + t] && !S.dismissed['todo' + k]) out.push({ k, text, act, btn, data: data || {}, cls, skip }); };
     // back up, at least once a week
     const lb = S.lastBackup;
-    if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7)) add('bk', lb ? `It has been ${C.daysBetween(lb, t)} days since your last backup. Your data only lives on this phone, so save a backup to iCloud Drive.` : 'You have not backed up yet. Your data only lives on this phone, so save a backup to iCloud Drive.', 'exportBackup', 'Back up now', {}, lb ? 'y' : 'r');
+    if ((S.expenses.length || S.setupDone) && (!lb || C.daysBetween(lb, t) >= 7)) add('bk', lb ? `It has been ${C.daysBetween(lb, t)} days since your last backup. Your data only lives on this phone, so save a backup somewhere safe, like iCloud Drive or Google Drive.` : 'You have not backed up yet. Your data only lives on this phone, so save a backup somewhere safe, like iCloud Drive or Google Drive.', 'exportBackup', 'Back up now', {}, lb ? 'y' : 'r');
     // subscriptions to look over
     const sd = subsDue();
     if (sd.length) add('subs' + mk, `${sd.length} subscription${sd.length === 1 ? '' : 's'} to look over: ${esc(sd.slice(0, 3).map((x) => x.name).join(', '))}${sd.length > 3 ? ' and more' : ''}. Still using ${sd.length === 1 ? 'it' : 'them'}?`, 'openMore', 'Review', { v: 'bills' });
@@ -845,7 +845,7 @@
     ['Savings goals', 'The Goals tab has your savings goals, like a trip fund. On a trip, tick Trip spending on purchases so they come out of the trip fund, not your weekly money.', [['Open Goals', 'tab', { t: 'goals' }]]],
     ['Your bank statement', 'You can import transactions from your bank as a CSV file, or a screenshot. The app sorts them, skips duplicates, and lists money coming in unchecked so you only tick real refunds.', [['Import', 'openMore', { v: 'import' }]]],
     ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works. A new weekly amount starts this week, and past weeks keep what they had.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
-    ['Back up', 'Your data only lives on this phone. Back up every week and save the file to iCloud Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
+    ['Back up', 'Your data only lives on this phone. Back up every week and save the file somewhere safe, like iCloud Drive or Google Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
     ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
   ];
   function GuideView() {
@@ -1210,7 +1210,7 @@
       card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
       card('Lock', V.isAuto() ? `<p class="muted">No lock is on. Anyone holding your unlocked phone can open this app.</p><div class="btns"><button class="btn primary" data-act="setPinNow">Set a PIN</button></div>` : `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><button class="btn mt" data-act="removePin">Remove PIN, no lock</button><div id="facebox"></div>`) +
-      card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive in case Safari clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
+      card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive or Google Drive in case your browser clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
       card('Privacy', '<p class="muted">Everything is stored encrypted on this device. No server, no analytics. This app never asks for bank logins, full card numbers, or account numbers.</p>') +
       card('Danger zone', (mahi() ? '<button class="btn" data-act="blankNow">I\'m not Mahi, clear his budget</button><p class="muted small">Keeps your passcode and logged expenses. Replaces the preloaded budget, bills, goals, and rules with blank ones.</p>' : '') + '<button class="mt btn danger" data-act="erase">Erase all data</button>');
   }
@@ -1981,14 +1981,20 @@
     },
     async faceOff() { await V.disableFace(); toast('Face ID is off'); fillFaceBox(); },
     async exportBackup() {
+      let text, name;
+      try { await flush(); text = await V.exportBackup(); name = 'money-backup-' + C.today() + '.json'; }
+      catch (e) { toast('Backup failed: ' + ((e && e.message) || 'could not read your data')); return; }
+      const file = new File([text], name, { type: 'application/json' });
+      // The share sheet is nicest on iPhone. Some phones refuse it, so any problem other than cancelling falls back to a plain download.
+      let done = false;
       try {
-        await flush();
-        const text = await V.exportBackup(), name = 'money-backup-' + C.today() + '.json';
-        const file = new File([text], name, { type: 'application/json' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: 'Money backup' });
-        else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
-        S.lastBackup = C.today(); save(); render();
-      } catch (e) { if (e && e.name !== 'AbortError') toast('Backup failed'); }
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Money backup' }); done = true; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+      if (!done) {
+        try { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+        catch (e) { toast('Backup failed: ' + ((e && e.message) || 'could not save the file')); return; }
+      }
+      S.lastBackup = C.today(); save(); render();
     },
     pickBackup() { $('#bkfile').click(); },
     blankNow() {

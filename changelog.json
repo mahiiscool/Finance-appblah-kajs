@@ -1,5 +1,20 @@
 [
   {
+    "v": 36,
+    "date": "2026-11-27",
+    "title": "Backup on Android",
+    "items": [
+      {
+        "type": "fix",
+        "text": "Back up now no longer says Backup failed on some Android phones. If the share menu will not take the file, the app now saves it as a download instead."
+      },
+      {
+        "type": "change",
+        "text": "Backup reminders now say iCloud Drive or Google Drive, so they make sense on any phone."
+      }
+    ]
+  },
+  {
     "v": 35,
     "date": "2026-11-27",
     "title": "Fix last week",
