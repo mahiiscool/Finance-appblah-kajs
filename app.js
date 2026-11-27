@@ -1652,7 +1652,7 @@
       try {
         S = Object.assign(defaultState(), await V.importBackup(ui.pendingBackup, fd.get('p') || ''));
         setPinHint(!V.isAuto() && /^\d{6}$/.test(fd.get('p') || ''));
-        ui.pendingBackup = null; closeSheet(); toast('Backup restored'); render();
+        ui.pendingBackup = null; closeSheet(); startSession(); toast('Backup restored');
       } catch (e) { toast(e.message || 'Could not restore'); }
     }
   };

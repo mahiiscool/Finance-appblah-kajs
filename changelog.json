@@ -1,5 +1,16 @@
 [
   {
+    "v": 33,
+    "date": "2026-11-27",
+    "title": "Backup restore",
+    "items": [
+      {
+        "type": "fix",
+        "text": "Restoring an older backup now brings it fully up to date right away. Before, some of the newest changes only showed up after you closed and reopened the app."
+      }
+    ]
+  },
+  {
     "v": 32,
     "date": "2026-11-27",
     "title": "Bug fixes",
