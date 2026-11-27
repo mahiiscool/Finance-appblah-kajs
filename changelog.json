@@ -1,5 +1,24 @@
 [
   {
+    "v": 38,
+    "date": "2026-11-27",
+    "title": "Update prompt",
+    "items": [
+      {
+        "type": "new",
+        "text": "The app now looks for a new version by itself, every time you open it and now and then while it stays open, on iPhone and Android."
+      },
+      {
+        "type": "new",
+        "text": "When a new version is ready, it asks if you want to update, with Update and Not now buttons. Nothing updates until you say so, and your data is saved first."
+      },
+      {
+        "type": "change",
+        "text": "Check for updates in Settings is still there if you want to check by hand."
+      }
+    ]
+  },
+  {
     "v": 37,
     "date": "2026-11-27",
     "title": "Android fixes",

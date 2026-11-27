@@ -5,7 +5,7 @@
   // The phone unlock is Face ID on iPhone and fingerprint or face on Android, so the wording follows the phone.
   const BIO = /Android/i.test(navigator.userAgent) ? 'fingerprint unlock' : 'Face ID', bioCap = BIO.charAt(0).toUpperCase() + BIO.slice(1);
   let ui = { tab: 'home', bview: 'week', wOff: 0, mk: null, more: null, imp: null, bmk: null, rmk: null, hist: 40, lastCat: 'food', pendingBackup: null };
-  let hiddenAt = 0, saveT = null, dirty = false;
+  let hiddenAt = 0, saveT = null, dirty = false, updateReady = false, lastUpdCheck = 0;
 
   // ---------- helpers ----------
   const $ = (s, el) => (el || document).querySelector(s);
@@ -531,6 +531,7 @@
   const back = () => '<button class="back" data-act="moreBack">Back</button>';
 
   // ---------- render ----------
+  const UPDBAR = '<div class="card"><p class="label">New version ready</p><p>A new version of the app is ready. Do you want to update now? Your data is not touched.</p><div class="btns"><button class="btn" data-act="updateLater">Not now</button><button class="btn primary" data-act="applyUpdate">Update</button></div></div>';
   function render() {
     if (!S) return;
     if (syncSubs()) save();
@@ -543,6 +544,7 @@
       case 'goals': body = Goals(); break;
       default: body = More();
     }
+    if (updateReady && !ui.updLater) body = UPDBAR + body;
     const tabs = [['home', 'Home', ICON.home], ['budget', 'Budget', ICON.chart], ['add'], ['ious', 'IOUs', ICON.people], ['goals', 'Goals', ICON.target], ['more', 'More', ICON.more]];
     $('#app').innerHTML = `<div class="screen">${body}</div>` +
       `<nav class="tabbar">${tabs.map((t) => t[0] === 'add' ? '<button class="addtab" data-act="add" aria-label="Add expense"><span class="plus">+</span><span>Add</span></button>' : `<button class="${ui.tab === t[0] ? 'on' : ''}" data-act="tab" data-t="${t[0]}">${t[0] === 'more' && logUnread() ? '<i class="ndot"></i>' : ''}${t[2]}<span>${t[1]}</span></button>`).join('')}</nav>`;
@@ -847,6 +849,7 @@
     ['Savings goals', 'The Goals tab has your savings goals, like a trip fund. On a trip, tick Trip spending on purchases so they come out of the trip fund, not your weekly money.', [['Open Goals', 'tab', { t: 'goals' }]]],
     ['Your bank statement', 'You can import transactions from your bank as a CSV file, or a screenshot. The app sorts them, skips duplicates, and lists money coming in unchecked so you only tick real refunds.', [['Import', 'openMore', { v: 'import' }]]],
     ['Change your numbers', 'Your income, weekly money, and bills are all in More, Budget and income. Plan check at the top shows if the plan works. A new weekly amount starts this week, and past weeks keep what they had.', [['Budget and income', 'openMore', { v: 'budgetEdit' }]]],
+    ['Updates', 'The app looks for a new version by itself whenever you open it. When one is ready, it asks if you want to update. Tap Update, or Not now to wait. Your data is not touched. You can also check by hand in Settings.', [['Open Settings', 'settings', {}]]],
     ['Back up', 'Your data only lives on this phone. Back up every week and save the file somewhere safe, like iCloud Drive or Google Drive. On a new phone, set the app up, then go to Settings and tap Restore backup.', [['Back up now', 'exportBackup', {}]]],
     ['Can I afford this?', 'Type a price and it shows how it would hit this week and this month before you buy. It is in More, and at the bottom of Home.', [['Try it', 'openMore', { v: 'afford' }]]]
   ];
@@ -1211,7 +1214,7 @@
   function SecurityView() {
     return back() + `<h1 class="title">Settings</h1><div class="sub">Your data never leaves this device</div>` +
       card('Theme', `<div class="chips">${THEMES.map((t) => `<label class="${getTheme() === t[0] ? 'on' : ''}"><button type="button" class="tbtn" data-act="setTheme" data-v="${t[0]}"><span class="dot d-${t[0]}"></span>${t[1]}</button></label>`).join('')}</div>`) +
-      card('App updates', `<p class="muted small">Pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
+      card('App updates', `<p class="muted small">The app also looks for updates by itself when you open it. This pulls the newest version from GitHub. Your data is not touched.</p><button class="btn" data-act="updateApp">Check for updates</button>`) +
       card('Text size', `<input type="range" id="uiscale" class="slider" min="70" max="130" step="5" value="${Math.round(getScale() * 100)}"><div class="row muted small"><span>Smaller</span><span id="uiscaleval">${Math.round(getScale() * 100)}%</span><span>Larger</span></div><button class="btn small mt" data-act="resetScale">Reset to 100%</button>`) +
       card('Lock', V.isAuto() ? `<p class="muted">No lock is on. Anyone holding your unlocked phone can open this app.</p><div class="btns"><button class="btn primary" data-act="setPinNow">Set a PIN</button></div>` : `<p class="muted">Locks after 5 minutes in the background.</p><div class="btns"><button class="btn" data-act="lockNow">Lock now</button><button class="btn" data-act="changePass">Change PIN</button></div><button class="btn mt" data-act="removePin">Remove PIN, no lock</button><div id="facebox"></div>`) +
       card('Backup', `<p class="muted">Saves an encrypted file. Keep it in iCloud Drive or Google Drive in case your browser clears storage.${V.isAuto() ? ' With no PIN on, this file can be opened by anyone who has it, so keep it somewhere private.' : ''} ${S.lastBackup ? 'Last backup ' + C.shortDate(S.lastBackup) + '.' : 'No backup yet.'}</p><div class="btns"><button class="btn" data-act="exportBackup">Export backup</button><button class="btn" data-act="pickBackup">Restore backup</button></div><input type="file" id="bkfile" accept=".json,application/json" hidden>`) +
@@ -2204,7 +2207,10 @@
     document.body.classList.toggle('hidden', document.hidden);
     if (document.hidden) { hiddenAt = Date.now(); await flush(); }
     else if (S && hiddenAt && Date.now() - hiddenAt > MIN5 && !V.isAuto()) lock();
+    if (!document.hidden) checkUpdate();
   });
+  window.addEventListener('online', () => checkUpdate(true));
+  setInterval(() => { if (!document.hidden) checkUpdate(); }, 30 * 60 * 1000);
   window.addEventListener('pagehide', () => { hiddenAt = hiddenAt || Date.now(); flush(); });
 
   // ---------- display size (per device, not encrypted so it applies on the lock screen too) ----------
@@ -2263,6 +2269,33 @@
       location.reload();
     } catch (e) { done('Could not check right now. Try again with internet.'); }
   };
+  // Looks for a newer version now and then, so a phone that keeps the app open for days still gets updates.
+  async function checkUpdate(force) {
+    if (!('serviceWorker' in navigator) || updating) return;
+    const now = Date.now(); if (!force && now - lastUpdCheck < 5 * 60 * 1000) return;
+    lastUpdCheck = now;
+    try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) { /* offline, try again later */ }
+  }
+  // Nothing updates until you say so. Your data is saved first, and if saving fails the update waits.
+  actions.applyUpdate = async () => {
+    if (updating) return;
+    updating = true;
+    try {
+      await flush();
+      if (S && V.isUnlocked()) await V.save(S);
+    } catch (e) { updating = false; toast('Could not save first, so the update waited. Try again.'); return; }
+    try { sessionStorage.setItem('moneyUpdated', JSON.stringify({ tab: ui.tab, more: ui.more })); } catch (e) {}
+    location.reload();
+  };
+  actions.updateLater = () => { ui.updLater = true; render(); };
+  if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || updating) return;
+      updateReady = true; ui.updLater = false;
+      if (S) renderWhenIdle();
+    });
+  }
   actions.setTheme = (d) => { try { localStorage.setItem('moneytheme', d.v); } catch (e) {} applyTheme(d.v); render(); };
   applyTheme(getTheme());
   applyScale(getScale());
